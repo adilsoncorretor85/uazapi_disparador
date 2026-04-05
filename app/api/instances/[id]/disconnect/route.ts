@@ -56,6 +56,10 @@ export async function POST(
     const text = await response.text()
     const payload = text ? safeJson(text) : {}
 
+    if (response.ok) {
+      await updateConnectionStatus(params.id, payload, "Desconectado")
+    }
+
     return NextResponse.json(payload, { status: response.ok ? 200 : 500 })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro ao desconectar instância"
@@ -69,4 +73,31 @@ function safeJson(text: string) {
   } catch {
     return { message: text }
   }
+}
+
+function inferStatus(payload: Record<string, unknown>, fallback: string) {
+  const candidates = [
+    payload.status,
+    payload.state,
+    payload.connection,
+    payload?.instance?.status,
+    payload?.instance?.state
+  ]
+
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim()
+    }
+  }
+
+  return fallback
+}
+
+async function updateConnectionStatus(id: string, payload: Record<string, unknown>, fallback: string) {
+  const supabase = createAdminClient()
+  const status = inferStatus(payload, fallback)
+  await supabase.rpc("update_whatsapp_instance_connection", {
+    p_id: id,
+    p_conexao_w: status
+  })
 }

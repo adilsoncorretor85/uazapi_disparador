@@ -286,3 +286,19 @@ grant execute on function public.save_whatsapp_instance(
 ) to service_role;
 grant execute on function public.get_whatsapp_instance_secret(uuid) to service_role;
 grant execute on function public.list_webhook_events(bigint, integer, integer) to service_role;
+create or replace function public.update_whatsapp_instance_connection(
+  p_id uuid,
+  p_conexao_w text
+)
+returns void
+language sql
+security definer
+set search_path = private, public
+as $$
+  update private.whatsapp_instances
+  set conexao_w = p_conexao_w
+  where id = p_id;
+$$;
+
+revoke all on function public.update_whatsapp_instance_connection(uuid, text) from public;
+grant execute on function public.update_whatsapp_instance_connection(uuid, text) to service_role;
