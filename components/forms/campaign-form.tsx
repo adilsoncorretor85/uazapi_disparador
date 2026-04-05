@@ -1,5 +1,6 @@
 ﻿"use client"
 
+import { useEffect, useMemo, useState } from "react"
 import { useForm, useFieldArray } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useQuery } from "@tanstack/react-query"
@@ -10,6 +11,7 @@ import {
   type CampaignFormValues
 } from "@/lib/schemas/campaign"
 import { fetchInstances } from "@/lib/services/instances"
+import { uploadMedia } from "@/lib/services/storage"
 import { formatNumber } from "@/lib/format"
 import { CAMPAIGN_STATUS_LABELS } from "@/lib/constants/status"
 import {
@@ -91,6 +93,30 @@ export function CampaignForm({ initialData, onSubmit, submitLabel }: CampaignFor
   const messageBody = watchValues.message_body
   const mediaUrl = watchValues.media_url
   const mediaType = watchValues.media_type
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
+  const acceptTypes = useMemo(() => {
+    switch (mediaType) {
+      case "image":
+        return "image/*"
+      case "video":
+        return "video/*"
+      case "audio":
+        return "audio/*"
+      case "document":
+        return "*/*"
+      default:
+        return ""
+    }
+  }, [mediaType])
+
+  useEffect(() => {
+    if (mediaType === "none" && mediaUrl) {
+      form.setValue("media_url", "", { shouldDirty: true, shouldValidate: true })
+      setUploadError(null)
+    }
+  }, [mediaType, mediaUrl, form])
 
   const summary = {
     title: watchValues.title,
@@ -264,14 +290,49 @@ export function CampaignForm({ initialData, onSubmit, submitLabel }: CampaignFor
                     </FormItem>
                   )}
                 />
+                <FormItem>
+                  <FormLabel>Arquivo da mídia (Supabase)</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="file"
+                      accept={acceptTypes}
+                      disabled={mediaType === "none" || isUploading}
+                      onChange={async (event) => {
+                        const file = event.target.files?.[0]
+                        if (!file) return
+                        setIsUploading(true)
+                        setUploadError(null)
+                        try {
+                          const result = await uploadMedia(file, "campaigns")
+                          form.setValue("media_url", result.url, {
+                            shouldDirty: true,
+                            shouldValidate: true
+                          })
+                        } catch (error) {
+                          const message =
+                            error instanceof Error ? error.message : "Erro ao enviar mídia"
+                          setUploadError(message)
+                        } finally {
+                          setIsUploading(false)
+                        }
+                      }}
+                    />
+                  </FormControl>
+                  {isUploading ? (
+                    <p className="text-xs text-muted-foreground">Enviando arquivo...</p>
+                  ) : null}
+                  {uploadError ? (
+                    <p className="text-xs text-destructive">{uploadError}</p>
+                  ) : null}
+                </FormItem>
                 <FormField
                   control={form.control}
                   name="media_url"
                   render={({ field }) => (
-                    <FormItem>
+                    <FormItem className="md:col-span-2">
                       <FormLabel>URL da mídia</FormLabel>
                       <FormControl>
-                        <Input placeholder="https://" {...field} />
+                        <Input placeholder="URL gerada automaticamente" readOnly {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
