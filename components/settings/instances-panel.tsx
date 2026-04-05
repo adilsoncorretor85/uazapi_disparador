@@ -226,11 +226,11 @@ export default function InstancesPanel() {
                     send_readchat: editing.send_readchat,
                     send_composing: editing.send_composing,
                     descricao: editing.descricao ?? "",
-                    telefone: editing.telefone ?? "",
                     cidade: editing.cidade ?? "",
                     estado: editing.estado ?? "",
                     campanha_pause: editing.campanha_pause ?? false,
                     campanha_horario_pause: editing.campanha_horario_pause ?? "20:00",
+                    campanha_horario_reinicio: editing.campanha_horario_reinicio ?? "07:00",
                     throttle_per_minute: editing.throttle_per_minute ?? 60,
                     token: ""
                   }

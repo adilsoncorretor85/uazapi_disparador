@@ -11,7 +11,8 @@ alter table private.whatsapp_instances
   add column if not exists prazo_solicitacoes text,
   add column if not exists conexao_w text,
   add column if not exists campanha_pause boolean not null default false,
-  add column if not exists campanha_horario_pause time not null default '20:00:00'::time;
+  add column if not exists campanha_horario_pause time not null default '20:00:00'::time,
+  add column if not exists campanha_horario_reinicio time not null default '07:00:00'::time;
 
 drop function if exists public.list_whatsapp_instances();
 
@@ -32,6 +33,7 @@ returns table (
   conexao_w text,
   campanha_pause boolean,
   campanha_horario_pause time,
+  campanha_horario_reinicio time,
   is_active boolean,
   send_readchat boolean,
   send_composing boolean,
@@ -58,6 +60,7 @@ as $$
          conexao_w,
          campanha_pause,
          campanha_horario_pause,
+         campanha_horario_reinicio,
          is_active,
          send_readchat,
          send_composing,
@@ -98,6 +101,7 @@ create or replace function public.save_whatsapp_instance(
   p_conexao_w text,
   p_campanha_pause boolean,
   p_campanha_horario_pause time,
+  p_campanha_horario_reinicio time,
   p_token text,
   p_is_active boolean,
   p_send_readchat boolean,
@@ -128,6 +132,7 @@ begin
       conexao_w,
       campanha_pause,
       campanha_horario_pause,
+      campanha_horario_reinicio,
       token,
       is_active,
       send_readchat,
@@ -148,6 +153,7 @@ begin
       p_conexao_w,
       coalesce(p_campanha_pause, false),
       coalesce(p_campanha_horario_pause, '20:00:00'::time),
+      coalesce(p_campanha_horario_reinicio, '07:00:00'::time),
       p_token,
       coalesce(p_is_active, true),
       coalesce(p_send_readchat, false),
@@ -171,6 +177,7 @@ begin
         conexao_w = p_conexao_w,
         campanha_pause = coalesce(p_campanha_pause, campanha_pause),
         campanha_horario_pause = coalesce(p_campanha_horario_pause, campanha_horario_pause),
+        campanha_horario_reinicio = coalesce(p_campanha_horario_reinicio, campanha_horario_reinicio),
         token = case when p_token is null or p_token = '' then token else p_token end,
         is_active = coalesce(p_is_active, is_active),
         send_readchat = coalesce(p_send_readchat, send_readchat),
@@ -235,6 +242,20 @@ as $$
   limit p_limit offset p_offset;
 $$;
 
+create or replace function public.update_whatsapp_instance_connection(
+  p_id uuid,
+  p_conexao_w text
+)
+returns void
+language sql
+security definer
+set search_path = private, public
+as $$
+  update private.whatsapp_instances
+  set conexao_w = p_conexao_w
+  where id = p_id;
+$$;
+
 revoke all on function public.list_whatsapp_instances() from public;
 revoke all on function public.save_whatsapp_instance(
   uuid,
@@ -252,6 +273,7 @@ revoke all on function public.save_whatsapp_instance(
   text,
   boolean,
   time,
+  time,
   text,
   boolean,
   boolean,
@@ -259,6 +281,7 @@ revoke all on function public.save_whatsapp_instance(
   integer
 ) from public;
 revoke all on function public.get_whatsapp_instance_secret(uuid) from public;
+revoke all on function public.update_whatsapp_instance_connection(uuid, text) from public;
 revoke all on function public.list_webhook_events(bigint, integer, integer) from public;
 
 grant execute on function public.list_whatsapp_instances() to service_role;
@@ -278,6 +301,7 @@ grant execute on function public.save_whatsapp_instance(
   text,
   boolean,
   time,
+  time,
   text,
   boolean,
   boolean,
@@ -285,20 +309,5 @@ grant execute on function public.save_whatsapp_instance(
   integer
 ) to service_role;
 grant execute on function public.get_whatsapp_instance_secret(uuid) to service_role;
-grant execute on function public.list_webhook_events(bigint, integer, integer) to service_role;
-create or replace function public.update_whatsapp_instance_connection(
-  p_id uuid,
-  p_conexao_w text
-)
-returns void
-language sql
-security definer
-set search_path = private, public
-as $$
-  update private.whatsapp_instances
-  set conexao_w = p_conexao_w
-  where id = p_id;
-$$;
-
-revoke all on function public.update_whatsapp_instance_connection(uuid, text) from public;
 grant execute on function public.update_whatsapp_instance_connection(uuid, text) to service_role;
+grant execute on function public.list_webhook_events(bigint, integer, integer) to service_role;

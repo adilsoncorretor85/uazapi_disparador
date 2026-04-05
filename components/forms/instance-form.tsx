@@ -13,6 +13,13 @@ import {
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select"
 import { instanceFormSchema, type InstanceFormValues } from "@/lib/schemas/instance"
 
 interface InstanceFormProps {
@@ -28,11 +35,11 @@ const initialValues: InstanceFormValues = {
   instance_name: "",
   owner_number: "",
   descricao: "",
-  telefone: "",
   cidade: "",
   estado: "",
   campanha_pause: false,
   campanha_horario_pause: "20:00",
+  campanha_horario_reinicio: "07:00",
   is_active: true,
   send_readchat: false,
   send_composing: false,
@@ -135,32 +142,18 @@ export function InstanceForm({ defaultValues, onSubmit, submitLabel }: InstanceF
           )}
         />
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <FormField
-            control={form.control}
-            name="descricao"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Descrição</FormLabel>
-                <FormControl>
-                  <Input {...field} />
-                </FormControl>
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="telefone"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Telefone</FormLabel>
-                <FormControl>
-                  <Input {...field} />
-                </FormControl>
-              </FormItem>
-            )}
-          />
-        </div>
+        <FormField
+          control={form.control}
+          name="descricao"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Descrição</FormLabel>
+              <FormControl>
+                <Input {...field} />
+              </FormControl>
+            </FormItem>
+          )}
+        />
 
         <div className="grid gap-4 md:grid-cols-2">
           <FormField
@@ -209,12 +202,47 @@ export function InstanceForm({ defaultValues, onSubmit, submitLabel }: InstanceF
               <FormItem>
                 <FormLabel>Horário de pausa</FormLabel>
                 <FormControl>
-                  <Input type="time" {...field} />
+                  <Select value={field.value ?? "20:00"} onValueChange={field.onChange}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="17:00">17h</SelectItem>
+                      <SelectItem value="18:00">18h</SelectItem>
+                      <SelectItem value="20:00">20h</SelectItem>
+                      <SelectItem value="21:00">21h</SelectItem>
+                      <SelectItem value="22:00">22h</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </FormControl>
               </FormItem>
             )}
           />
         </div>
+
+        <FormField
+          control={form.control}
+          name="campanha_horario_reinicio"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Horário de reinício</FormLabel>
+              <FormControl>
+                <Select value={field.value ?? "07:00"} onValueChange={field.onChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="07:00">07h</SelectItem>
+                    <SelectItem value="08:00">08h</SelectItem>
+                    <SelectItem value="09:00">09h</SelectItem>
+                    <SelectItem value="12:00">12h</SelectItem>
+                    <SelectItem value="13:00">13h</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FormControl>
+            </FormItem>
+          )}
+        />
 
         <FormField
           control={form.control}

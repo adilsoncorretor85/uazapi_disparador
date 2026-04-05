@@ -10,7 +10,6 @@ export interface WhatsAppInstance {
   owner_number: string
   webhook_secret?: string | null
   descricao?: string | null
-  telefone?: string | null
   cidade?: string | null
   estado?: string | null
   acessores?: string[] | null
@@ -18,6 +17,7 @@ export interface WhatsAppInstance {
   conexao_w?: string | null
   campanha_pause?: boolean | null
   campanha_horario_pause?: string | null
+  campanha_horario_reinicio?: string | null
   is_active: boolean
   send_readchat: boolean
   send_composing: boolean
