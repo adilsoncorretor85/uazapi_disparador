@@ -35,6 +35,8 @@ import {
   SelectValue
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
+import { WhatsAppMessageEditor } from "@/components/common/whatsapp-message-editor"
+import { WhatsAppPreview } from "@/components/common/whatsapp-preview"
 
 interface CampaignFormProps {
   initialData?: CampaignFormValues
@@ -347,30 +349,16 @@ export function CampaignForm({ initialData, onSubmit, submitLabel }: CampaignFor
                   <FormItem>
                     <FormLabel>Mensagem principal</FormLabel>
                     <FormControl>
-                      <Textarea placeholder="Digite a mensagem" {...field} />
+                      <WhatsAppMessageEditor
+                        value={field.value}
+                        onChange={field.onChange}
+                        placeholder="Digite a mensagem"
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
-
-              <div className="rounded-xl border bg-muted/30 p-4">
-                <p className="text-xs font-semibold uppercase text-muted-foreground">Preview</p>
-                <div className="mt-3 space-y-2">
-                  <p className="text-sm">{messageBody || "Sua mensagem aparecerá aqui."}</p>
-                  {mediaUrl && mediaType !== "none" ? (
-                    <div className="overflow-hidden rounded-lg border bg-background">
-                      {mediaType === "image" ? (
-                        <img src={mediaUrl} alt="Preview" className="h-40 w-full object-cover" />
-                      ) : (
-                        <div className="p-4 text-sm text-muted-foreground">
-                          Prévia de {mediaType}: {mediaUrl}
-                        </div>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
             </div>
           </Card>
 
@@ -537,7 +525,12 @@ export function CampaignForm({ initialData, onSubmit, submitLabel }: CampaignFor
                               <FormItem className="md:col-span-2">
                                 <FormLabel>Mensagem</FormLabel>
                                 <FormControl>
-                                  <Textarea {...field} />
+                                  <WhatsAppMessageEditor
+                                    value={field.value}
+                                    onChange={field.onChange}
+                                    placeholder="Mensagem da variante"
+                                    rows={5}
+                                  />
                                 </FormControl>
                               </FormItem>
                             )}
@@ -632,6 +625,14 @@ export function CampaignForm({ initialData, onSubmit, submitLabel }: CampaignFor
         </div>
 
         <div className="space-y-4">
+          <WhatsAppPreview
+            message={messageBody}
+            mediaType={mediaType}
+            mediaUrl={mediaUrl}
+            useRandomizer={watchRandomizer}
+            variants={watchValues.variants}
+          />
+
           <Card>
             <div className="space-y-3">
               <h3 className="font-display text-lg font-semibold">Ações</h3>
