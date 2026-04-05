@@ -33,10 +33,11 @@ export default function CampaignCreate() {
       ) : null}
 
       <CampaignForm
+        mode="create"
+        isSubmitting={mutation.isPending}
         onSubmit={async (values) => {
           await mutation.mutateAsync(values)
         }}
-        submitLabel={mutation.isPending ? "Salvando..." : "Criar campanha"}
       />
     </div>
   )

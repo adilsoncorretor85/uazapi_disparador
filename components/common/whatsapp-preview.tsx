@@ -16,8 +16,16 @@ const SAMPLE_CONTACT = {
   full_name: "Eduardo Dias"
 }
 
+function getGreeting() {
+  const hour = new Date().getHours()
+  if (hour < 12) return "Bom dia"
+  if (hour < 18) return "Boa tarde"
+  return "Boa noite"
+}
+
 function applyVariables(text: string) {
   return text
+    .replace(/{{\s*saudacao\s*}}/gi, getGreeting())
     .replace(/{{\s*primeiro_nome\s*}}/gi, SAMPLE_CONTACT.first_name)
     .replace(/{{\s*nome_completo\s*}}/gi, SAMPLE_CONTACT.full_name)
 }
@@ -103,11 +111,15 @@ export function WhatsAppPreview({
   useRandomizer,
   variants
 }: WhatsAppPreviewProps) {
-  const baseMessage = message?.trim() ? message : "Sua mensagem aparecerá aqui."
+  const hasMessage = Boolean(message?.trim())
+  const baseMessage = hasMessage ? message : "Sua mensagem aparecerá aqui."
   const activeVariants =
     useRandomizer && variants?.length
       ? variants.filter((variant) => variant.is_active !== false)
       : []
+
+  const showMedia = Boolean(mediaUrl && mediaType !== "none")
+  const showPlaceholder = !hasMessage && !showMedia
 
   return (
     <Card className="overflow-hidden">
@@ -123,25 +135,32 @@ export function WhatsAppPreview({
 
       <div className="bg-[#efe7dd] px-4 py-5">
         <div className="space-y-3">
-          <div className="max-w-[85%] rounded-2xl bg-white px-3 py-2 text-sm shadow-sm">
-            <div className="whitespace-pre-wrap leading-relaxed text-[#222]">
-              {renderWhatsAppText(baseMessage)}
-            </div>
-            <div className="mt-2 text-right text-[10px] text-muted-foreground">10:01</div>
-          </div>
-
-          {mediaUrl && mediaType !== "none" ? (
+          {showMedia ? (
             <div className="max-w-[85%] overflow-hidden rounded-2xl bg-white shadow-sm">
               {mediaType === "image" ? (
-                <img src={mediaUrl} alt="Preview" className="h-48 w-full object-cover" />
+                <img src={mediaUrl ?? ""} alt="Preview" className="h-48 w-full object-cover" />
               ) : (
                 <div className="p-3 text-xs text-muted-foreground">
                   {mediaType?.toUpperCase()} anexado
                 </div>
               )}
+              {hasMessage ? (
+                <div className="px-3 pb-2 pt-2 text-sm text-[#222]">
+                  <div className="whitespace-pre-wrap leading-relaxed">
+                    {renderWhatsAppText(baseMessage)}
+                  </div>
+                </div>
+              ) : null}
               <div className="px-3 pb-2 text-right text-[10px] text-muted-foreground">10:01</div>
             </div>
-          ) : null}
+          ) : (
+            <div className="max-w-[85%] rounded-2xl bg-white px-3 py-2 text-sm shadow-sm">
+              <div className="whitespace-pre-wrap leading-relaxed text-[#222]">
+                {renderWhatsAppText(showPlaceholder ? baseMessage : message)}
+              </div>
+              <div className="mt-2 text-right text-[10px] text-muted-foreground">10:01</div>
+            </div>
+          )}
 
           {activeVariants.length > 0 ? (
             <div className="space-y-2">

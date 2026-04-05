@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useForm, useFieldArray } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useQuery } from "@tanstack/react-query"
@@ -13,7 +13,6 @@ import {
 import { fetchInstances } from "@/lib/services/instances"
 import { uploadMedia } from "@/lib/services/storage"
 import { formatNumber } from "@/lib/format"
-import { CAMPAIGN_STATUS_LABELS } from "@/lib/constants/status"
 import {
   Form,
   FormControl,
@@ -41,7 +40,8 @@ import { WhatsAppPreview } from "@/components/common/whatsapp-preview"
 interface CampaignFormProps {
   initialData?: CampaignFormValues
   onSubmit: (values: CampaignFormValues) => Promise<void>
-  submitLabel?: string
+  mode?: "create" | "edit"
+  isSubmitting?: boolean
 }
 
 const defaultValues: CampaignFormValues = {
@@ -74,11 +74,35 @@ function toDateTimeLocal(value?: string | null) {
   )}:${pad(date.getMinutes())}`
 }
 
-export function CampaignForm({ initialData, onSubmit, submitLabel }: CampaignFormProps) {
+function splitDateTime(value?: string | null) {
+  if (!value) return { date: "", time: "" }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return { date: "", time: "" }
+  const pad = (num: number) => String(num).padStart(2, "0")
+  return {
+    date: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    time: `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  }
+}
+
+export function CampaignForm({
+  initialData,
+  onSubmit,
+  mode = "create",
+  isSubmitting
+}: CampaignFormProps) {
   const form = useForm<CampaignFormValues>({
     resolver: zodResolver(campaignFormSchema),
     defaultValues: initialData ?? defaultValues
   })
+
+  const submitActionRef = useRef<"publish" | "draft">("publish")
+  const initialSchedule = splitDateTime(initialData?.scheduled_at ?? null)
+  const [scheduleEnabled, setScheduleEnabled] = useState(
+    Boolean(initialData?.scheduled_at)
+  )
+  const [scheduleDate, setScheduleDate] = useState(initialSchedule.date)
+  const [scheduleTime, setScheduleTime] = useState(initialSchedule.time)
 
   const { fields, append, remove, move } = useFieldArray({
     control: form.control,
@@ -97,6 +121,21 @@ export function CampaignForm({ initialData, onSubmit, submitLabel }: CampaignFor
   const mediaType = watchValues.media_type
   const [isUploading, setIsUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const busy = isSubmitting ?? form.formState.isSubmitting
+
+  useEffect(() => {
+    if (!scheduleEnabled) {
+      form.setValue("scheduled_at", null, { shouldDirty: true, shouldValidate: true })
+      return
+    }
+
+    if (scheduleDate && scheduleTime) {
+      form.setValue("scheduled_at", `${scheduleDate}T${scheduleTime}`, {
+        shouldDirty: true,
+        shouldValidate: true
+      })
+    }
+  }, [scheduleEnabled, scheduleDate, scheduleTime, form])
 
   const acceptTypes = useMemo(() => {
     switch (mediaType) {
@@ -123,7 +162,9 @@ export function CampaignForm({ initialData, onSubmit, submitLabel }: CampaignFor
   const summary = {
     title: watchValues.title,
     instance: instances?.find((inst) => inst.id === watchValues.instance_id)?.name ?? "-",
-    scheduled: watchValues.scheduled_at ? toDateTimeLocal(watchValues.scheduled_at) : "Sem agendamento",
+    scheduled: watchValues.scheduled_at
+      ? toDateTimeLocal(watchValues.scheduled_at)
+      : "Sem agendamento",
     delay: `${watchValues.delay_min_seconds ?? 0}s - ${watchValues.delay_max_seconds ?? 0}s`,
     batch: watchValues.batch_size ?? 0,
     maxAttempts: watchValues.max_attempts ?? 0,
@@ -134,7 +175,28 @@ export function CampaignForm({ initialData, onSubmit, submitLabel }: CampaignFor
     <Form {...form}>
       <form
         className="grid gap-6 lg:grid-cols-[2fr_1fr]"
-        onSubmit={form.handleSubmit(onSubmit)}
+        onSubmit={form.handleSubmit(async (values) => {
+          const payload: CampaignFormValues = { ...values }
+          const shouldSchedule = scheduleEnabled && Boolean(payload.scheduled_at)
+
+          if (mode === "create") {
+            if (submitActionRef.current === "draft") {
+              payload.status = "draft"
+              payload.scheduled_at = null
+            } else {
+              payload.status = shouldSchedule ? "scheduled" : "processing"
+              if (!shouldSchedule) {
+                payload.scheduled_at = null
+              }
+            }
+          }
+
+          if (mode === "edit" && submitActionRef.current === "draft") {
+            payload.status = "draft"
+          }
+
+          await onSubmit(payload)
+        })}
       >
         <div className="space-y-6">
           <Card>
@@ -200,61 +262,57 @@ export function CampaignForm({ initialData, onSubmit, submitLabel }: CampaignFor
                 )}
               />
 
-              <div className="grid gap-4 md:grid-cols-3">
-                <FormField
-                  control={form.control}
-                  name="status"
-                  render={({ field }) => (
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <Switch
+                    checked={scheduleEnabled}
+                    onCheckedChange={(value) => setScheduleEnabled(value)}
+                  />
+                  <div>
+                    <p className="text-sm font-medium">Agendar envio</p>
+                    <p className="text-xs text-muted-foreground">
+                      Se desativado, a campanha será publicada imediatamente.
+                    </p>
+                  </div>
+                </div>
+
+                {scheduleEnabled ? (
+                  <div className="grid gap-4 md:grid-cols-3">
                     <FormItem>
-                      <FormLabel>Status inicial</FormLabel>
-                      <Select value={field.value} onValueChange={field.onChange}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Status" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {Object.entries(CAMPAIGN_STATUS_LABELS).map(([value, label]) => (
-                            <SelectItem key={value} value={value}>
-                              {label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="scheduled_at"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Agendamento</FormLabel>
+                      <FormLabel>Dia</FormLabel>
                       <FormControl>
                         <Input
-                          type="datetime-local"
-                          value={toDateTimeLocal(field.value)}
-                          onChange={(event) => field.onChange(event.target.value)}
+                          type="date"
+                          value={scheduleDate}
+                          onChange={(event) => setScheduleDate(event.target.value)}
                         />
                       </FormControl>
-                      <FormMessage />
                     </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="timezone"
-                  render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Fuso horário</FormLabel>
+                      <FormLabel>Horário</FormLabel>
                       <FormControl>
-                        <Input placeholder="America/Sao_Paulo" {...field} />
+                        <Input
+                          type="time"
+                          value={scheduleTime}
+                          onChange={(event) => setScheduleTime(event.target.value)}
+                        />
                       </FormControl>
-                      <FormMessage />
                     </FormItem>
-                  )}
-                />
+                    <FormField
+                      control={form.control}
+                      name="timezone"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Fuso horário</FormLabel>
+                          <FormControl>
+                            <Input placeholder="America/Sao_Paulo" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                ) : null}
               </div>
             </div>
           </Card>
@@ -639,8 +697,42 @@ export function CampaignForm({ initialData, onSubmit, submitLabel }: CampaignFor
               <p className="text-sm text-muted-foreground">
                 Salve sua campanha ou volte depois.
               </p>
-              <Button type="submit" className="w-full">
-                {submitLabel ?? "Salvar campanha"}
+              {mode === "create" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  disabled={busy}
+                  onClick={() => {
+                    submitActionRef.current = "draft"
+                    form.handleSubmit(async (values) => {
+                      const payload: CampaignFormValues = {
+                        ...values,
+                        status: "draft",
+                        scheduled_at: null
+                      }
+                      await onSubmit(payload)
+                    })()
+                  }}
+                >
+                  Salvar rascunho
+                </Button>
+              ) : null}
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={busy}
+                onClick={() => {
+                  submitActionRef.current = "publish"
+                }}
+              >
+                {busy
+                  ? "Salvando..."
+                  : mode === "edit"
+                    ? "Salvar alterações"
+                    : scheduleEnabled
+                      ? "Agendar campanha"
+                      : "Publicar campanha"}
               </Button>
               <Button type="button" variant="outline" className="w-full" onClick={() => form.reset()}>
                 Limpar formulário

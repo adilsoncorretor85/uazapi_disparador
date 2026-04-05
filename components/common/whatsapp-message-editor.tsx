@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef } from "react"
-import { Bold, Italic, Strikethrough, Code, User, Users } from "lucide-react"
+import { Bold, Italic, Strikethrough, Code, User, Users, Sun } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -16,6 +16,7 @@ interface WhatsAppMessageEditorProps {
 }
 
 const VARIABLE_OPTIONS = [
+  { label: "saudacao", value: "{{saudacao}}", icon: Sun },
   { label: "primeiro_nome", value: "{{primeiro_nome}}", icon: User },
   { label: "nome_completo", value: "{{nome_completo}}", icon: Users }
 ]

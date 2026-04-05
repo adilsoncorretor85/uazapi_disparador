@@ -72,11 +72,12 @@ export default function CampaignEdit() {
       ) : null}
 
       <CampaignForm
+        mode="edit"
+        isSubmitting={mutation.isPending}
         initialData={initialData}
         onSubmit={async (values) => {
           await mutation.mutateAsync(values)
         }}
-        submitLabel={mutation.isPending ? "Salvando..." : "Salvar alterações"}
       />
     </div>
   )
