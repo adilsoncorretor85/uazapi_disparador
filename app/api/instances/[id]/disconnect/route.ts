@@ -33,7 +33,7 @@ export async function POST(
       )
     }
 
-    const baseUrl = instance.base_url.replace(/\\/$/, "")
+    const baseUrl = instance.base_url.replace(/\/$/, "")
     const url = `${baseUrl}/instance/disconnect`
     const body = instance.instance_name
       ? {
