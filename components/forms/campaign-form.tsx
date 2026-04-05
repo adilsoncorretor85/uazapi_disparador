@@ -102,15 +102,22 @@ function splitDateTime(value?: string | null) {
   }
 }
 
-const IMPORT_ALIASES = {
-  whatsapp: ["whatsapp", "telefone", "celular", "numero", "número", "phone"],
-  first_name: ["primeiro_nome", "first_name", "nome"],
-  full_name: ["nome_completo", "full_name"],
-  email: ["email", "e-mail"],
-  city: ["cidade", "city"],
-  state: ["estado", "uf", "state"],
-  tags: ["tags", "tag"]
-}
+const TEMPLATE_HEADERS = [
+  "nome",
+  "telefone",
+  "email",
+  "data_nascimento",
+  "genero",
+  "tags",
+  "bairro",
+  "cep",
+  "rua",
+  "cidade",
+  "estado",
+  "numero_residencia",
+  "complemento",
+  "ponto_referencia"
+]
 
 function normalizeHeader(value: string) {
   return value
@@ -121,56 +128,63 @@ function normalizeHeader(value: string) {
     .replace(/[^a-z0-9_]/g, "")
 }
 
-function extractValue(
-  row: Record<string, unknown>,
-  aliases: string[]
-): string | undefined {
-  const keys = Object.keys(row)
-  const normalized = new Map(keys.map((key) => [normalizeHeader(key), key]))
-  for (const alias of aliases) {
-    const rawKey = normalized.get(normalizeHeader(alias))
-    if (!rawKey) continue
-    const value = row[rawKey]
-    if (value === undefined || value === null) continue
-    const text = String(value).trim()
-    if (text) return text
-  }
-  return undefined
+const TEMPLATE_HEADERS_NORMALIZED = TEMPLATE_HEADERS.map(normalizeHeader)
+
+function validateTemplateHeaders(headerRow: unknown[]) {
+  const normalized = headerRow
+    .map((value) => normalizeHeader(String(value ?? "")))
+    .filter(Boolean)
+  if (normalized.length !== TEMPLATE_HEADERS_NORMALIZED.length) return false
+  return normalized.every((value, index) => value === TEMPLATE_HEADERS_NORMALIZED[index])
+}
+
+function normalizeRowKeys(row: Record<string, unknown>) {
+  const normalized: Record<string, unknown> = {}
+  Object.entries(row).forEach(([key, value]) => {
+    normalized[normalizeHeader(key)] = value
+  })
+  return normalized
 }
 
 function parseTags(value?: string) {
   if (!value) return undefined
   return value
-    .split(/[;,]/)
+    .split(",")
     .map((item) => item.trim())
     .filter(Boolean)
 }
 
 function mapImportRows(rows: Record<string, unknown>[]) {
   return rows
+    .map((row) => normalizeRowKeys(row))
     .map((row) => {
-      const whatsapp = extractValue(row, IMPORT_ALIASES.whatsapp)
+      const whatsapp = String(row.telefone ?? "").trim()
       if (!whatsapp) return null
 
-      const full_name = extractValue(row, IMPORT_ALIASES.full_name)
-      const first_name =
-        extractValue(row, IMPORT_ALIASES.first_name) ??
-        (full_name ? full_name.split(" ")[0] : undefined)
-      const email = extractValue(row, IMPORT_ALIASES.email)
-      const city = extractValue(row, IMPORT_ALIASES.city)
-      const state = extractValue(row, IMPORT_ALIASES.state)
-      const tags = parseTags(extractValue(row, IMPORT_ALIASES.tags))
-
-      const normalizedKeys = new Set(
-        Object.values(IMPORT_ALIASES).flat().map((alias) => normalizeHeader(alias))
-      )
+      const full_name = String(row.nome ?? "").trim()
+      const first_name = full_name ? full_name.split(" ")[0] : undefined
+      const email = String(row.email ?? "").trim() || undefined
+      const city = String(row.cidade ?? "").trim() || undefined
+      const state = String(row.estado ?? "").trim() || undefined
+      const tags = parseTags(String(row.tags ?? "").trim())
 
       const custom_fields: Record<string, unknown> = {}
-      Object.entries(row).forEach(([key, value]) => {
-        const normalizedKey = normalizeHeader(key)
-        if (normalizedKeys.has(normalizedKey)) return
-        if (value === null || value === undefined || value === "") return
-        custom_fields[normalizedKey] = value
+      const customKeys = [
+        "data_nascimento",
+        "genero",
+        "bairro",
+        "cep",
+        "rua",
+        "numero_residencia",
+        "complemento",
+        "ponto_referencia"
+      ]
+
+      customKeys.forEach((key) => {
+        const value = row[key]
+        if (value !== undefined && value !== null && String(value).trim() !== "") {
+          custom_fields[key] = value
+        }
       })
 
       return {
@@ -300,19 +314,27 @@ export function CampaignForm({
       const workbook = XLSX.read(buffer, { type: "array" })
       const sheetName = workbook.SheetNames[0]
       const sheet = workbook.Sheets[sheetName]
+      const headerRows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, range: 0 })
+      const headerRow = headerRows[0] as unknown[] | undefined
+      if (!headerRow || !validateTemplateHeaders(headerRow)) {
+        throw new Error(
+          "Arquivo inválido. Use exatamente o template padrão disponibilizado."
+        )
+      }
       const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
         defval: ""
       })
       const mappedRows = mapImportRows(rawRows)
+      const totalRows = rawRows.length
       if (mappedRows.length === 0) {
         throw new Error("Nenhum número válido encontrado no arquivo.")
       }
 
       const result = await importContacts(mappedRows, instanceId, defaultDdd)
       setImportSummary({
-        total: mappedRows.length,
+        total: totalRows,
         inserted: result.inserted,
-        ignored: result.ignored
+        ignored: result.ignored + Math.max(0, totalRows - mappedRows.length)
       })
       setImportedContacts(result.contacts)
       setAudienceMode("file")
@@ -592,9 +614,15 @@ export function CampaignForm({
                     </FormItem>
                   </div>
 
-                  <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
-                    Colunas aceitas: whatsapp, telefone, celular, nome, nome_completo, email,
-                    cidade, estado, tags. As demais colunas vão para custom_fields.
+                  <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+                    <span>
+                      Use somente o template padrão. Tags devem ser separadas por vírgula.
+                    </span>
+                    <Button asChild variant="link" size="sm">
+                      <a href="/templates/cidadaos_import_template.xlsx" download>
+                        Baixar template
+                      </a>
+                    </Button>
                   </div>
 
                   {importing ? (
