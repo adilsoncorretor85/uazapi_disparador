@@ -1,0 +1,57 @@
+﻿import type { Campaign } from "@/types/entities"
+
+export const mockCampaigns: Campaign[] = [
+  {
+    id: "camp_001",
+    instance_id: "inst_01",
+    title: "Reativação Clientes 2026",
+    description: "Campanha para reengajar clientes inativos.",
+    status: "processing",
+    use_randomizer: true,
+    message_body: "Olá, {{nome}}! Temos novidades.",
+    media_type: "image",
+    media_url: "https://picsum.photos/seed/camp1/640/420",
+    scheduled_at: null,
+    timezone: "America/Sao_Paulo",
+    delay_min_seconds: 8,
+    delay_max_seconds: 22,
+    batch_size: 80,
+    max_attempts: 3,
+    readchat: true,
+    use_composing: true,
+    total_numbers: 1240,
+    total_sent: 832,
+    total_delivered: 702,
+    total_read: 480,
+    total_failed: 22,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  },
+  {
+    id: "camp_002",
+    instance_id: "inst_02",
+    title: "Black Week Parceiros",
+    description: "Oferta limitada para parceiros",
+    status: "scheduled",
+    use_randomizer: false,
+    message_body: "Oferta exclusiva válida por 24h.",
+    media_type: "none",
+    media_url: null,
+    scheduled_at: new Date(Date.now() + 1000 * 60 * 60 * 6).toISOString(),
+    timezone: "America/Sao_Paulo",
+    delay_min_seconds: 5,
+    delay_max_seconds: 15,
+    batch_size: 120,
+    max_attempts: 2,
+    readchat: false,
+    use_composing: false,
+    total_numbers: 540,
+    total_sent: 0,
+    total_delivered: 0,
+    total_read: 0,
+    total_failed: 0,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  }
+]
+
