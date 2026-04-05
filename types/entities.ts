@@ -9,6 +9,15 @@ export interface WhatsAppInstance {
   instance_name: string
   owner_number: string
   webhook_secret?: string | null
+  descricao?: string | null
+  telefone?: string | null
+  cidade?: string | null
+  estado?: string | null
+  acessores?: string[] | null
+  prazo_solicitacoes?: string | null
+  conexao_w?: string | null
+  campanha_pause?: boolean | null
+  campanha_horario_pause?: string | null
   is_active: boolean
   send_readchat: boolean
   send_composing: boolean
@@ -19,6 +28,7 @@ export interface Contact {
   id: string
   first_name?: string | null
   full_name?: string | null
+  instance_id?: string | null
   whatsapp_e164: string
   whatsapp_digits?: string | null
   email?: string | null

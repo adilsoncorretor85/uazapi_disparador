@@ -1,7 +1,14 @@
 -- Contacts upsert support
-create unique index if not exists uq_contacts_whatsapp_digits
-on public.contacts (whatsapp_digits)
-where whatsapp_digits is not null and whatsapp_digits <> '';
+alter table public.contacts
+  add column if not exists instance_id uuid;
+
+drop index if exists public.uq_contacts_whatsapp_digits;
+create unique index if not exists uq_contacts_instance_whatsapp_digits
+on public.contacts (instance_id, whatsapp_digits)
+where instance_id is not null and whatsapp_digits is not null and whatsapp_digits <> '';
+
+create index if not exists idx_contacts_instance_id
+  on public.contacts (instance_id);
 
 -- Campaign audience selection
 create table if not exists public.campaign_contacts (

@@ -1,6 +1,20 @@
 -- Server-only helper functions to access private schema safely via service_role.
 -- Apply with: supabase db query --linked -f supabase/sql/private-access.sql
 
+alter table private.whatsapp_instances
+  add column if not exists usuario uuid,
+  add column if not exists descricao text,
+  add column if not exists telefone text,
+  add column if not exists cidade text,
+  add column if not exists estado text,
+  add column if not exists acessores text[],
+  add column if not exists prazo_solicitacoes text,
+  add column if not exists conexao_w text,
+  add column if not exists campanha_pause boolean not null default false,
+  add column if not exists campanha_horario_pause time not null default '20:00:00'::time;
+
+drop function if exists public.list_whatsapp_instances();
+
 create or replace function public.list_whatsapp_instances()
 returns table (
   id uuid,
@@ -9,6 +23,15 @@ returns table (
   base_url text,
   instance_name text,
   owner_number text,
+  descricao text,
+  telefone text,
+  cidade text,
+  estado text,
+  acessores text[],
+  prazo_solicitacoes text,
+  conexao_w text,
+  campanha_pause boolean,
+  campanha_horario_pause time,
   is_active boolean,
   send_readchat boolean,
   send_composing boolean,
@@ -26,6 +49,15 @@ as $$
          base_url,
          instance_name,
          owner_number,
+         descricao,
+         telefone,
+         cidade,
+         estado,
+         acessores,
+         prazo_solicitacoes,
+         conexao_w,
+         campanha_pause,
+         campanha_horario_pause,
          is_active,
          send_readchat,
          send_composing,
@@ -36,6 +68,20 @@ as $$
   order by created_at desc;
 $$;
 
+drop function if exists public.save_whatsapp_instance(
+  uuid,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  boolean,
+  boolean,
+  boolean,
+  integer
+);
+
 create or replace function public.save_whatsapp_instance(
   p_id uuid,
   p_name text,
@@ -43,6 +89,15 @@ create or replace function public.save_whatsapp_instance(
   p_base_url text,
   p_instance_name text,
   p_owner_number text,
+  p_descricao text,
+  p_telefone text,
+  p_cidade text,
+  p_estado text,
+  p_acessores text[],
+  p_prazo_solicitacoes text,
+  p_conexao_w text,
+  p_campanha_pause boolean,
+  p_campanha_horario_pause time,
   p_token text,
   p_is_active boolean,
   p_send_readchat boolean,
@@ -64,6 +119,15 @@ begin
       base_url,
       instance_name,
       owner_number,
+      descricao,
+      telefone,
+      cidade,
+      estado,
+      acessores,
+      prazo_solicitacoes,
+      conexao_w,
+      campanha_pause,
+      campanha_horario_pause,
       token,
       is_active,
       send_readchat,
@@ -75,6 +139,15 @@ begin
       p_base_url,
       p_instance_name,
       p_owner_number,
+      p_descricao,
+      p_telefone,
+      p_cidade,
+      p_estado,
+      p_acessores,
+      p_prazo_solicitacoes,
+      p_conexao_w,
+      coalesce(p_campanha_pause, false),
+      coalesce(p_campanha_horario_pause, '20:00:00'::time),
       p_token,
       coalesce(p_is_active, true),
       coalesce(p_send_readchat, false),
@@ -89,6 +162,15 @@ begin
         base_url = p_base_url,
         instance_name = p_instance_name,
         owner_number = p_owner_number,
+        descricao = p_descricao,
+        telefone = p_telefone,
+        cidade = p_cidade,
+        estado = p_estado,
+        acessores = p_acessores,
+        prazo_solicitacoes = p_prazo_solicitacoes,
+        conexao_w = p_conexao_w,
+        campanha_pause = coalesce(p_campanha_pause, campanha_pause),
+        campanha_horario_pause = coalesce(p_campanha_horario_pause, campanha_horario_pause),
         token = case when p_token is null or p_token = '' then token else p_token end,
         is_active = coalesce(p_is_active, is_active),
         send_readchat = coalesce(p_send_readchat, send_readchat),
@@ -100,6 +182,22 @@ begin
 
   return v_id;
 end;
+$$;
+
+create or replace function public.get_whatsapp_instance_secret(p_id uuid)
+returns table (
+  id uuid,
+  base_url text,
+  token text,
+  instance_name text
+)
+language sql
+security definer
+set search_path = private, public
+as $$
+  select id, base_url, token, instance_name
+  from private.whatsapp_instances
+  where id = p_id;
 $$;
 
 create or replace function public.list_webhook_events(
@@ -138,9 +236,53 @@ as $$
 $$;
 
 revoke all on function public.list_whatsapp_instances() from public;
-revoke all on function public.save_whatsapp_instance(uuid, text, text, text, text, text, text, boolean, boolean, boolean, integer) from public;
+revoke all on function public.save_whatsapp_instance(
+  uuid,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text[],
+  text,
+  text,
+  boolean,
+  time,
+  text,
+  boolean,
+  boolean,
+  boolean,
+  integer
+) from public;
+revoke all on function public.get_whatsapp_instance_secret(uuid) from public;
 revoke all on function public.list_webhook_events(bigint, integer, integer) from public;
 
 grant execute on function public.list_whatsapp_instances() to service_role;
-grant execute on function public.save_whatsapp_instance(uuid, text, text, text, text, text, text, boolean, boolean, boolean, integer) to service_role;
+grant execute on function public.save_whatsapp_instance(
+  uuid,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text[],
+  text,
+  text,
+  boolean,
+  time,
+  text,
+  boolean,
+  boolean,
+  boolean,
+  integer
+) to service_role;
+grant execute on function public.get_whatsapp_instance_secret(uuid) to service_role;
 grant execute on function public.list_webhook_events(bigint, integer, integer) to service_role;

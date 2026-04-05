@@ -16,7 +16,8 @@ const importRowSchema = z.object({
 
 const importPayloadSchema = z.object({
   rows: z.array(importRowSchema).min(1),
-  default_ddd: z.string().min(2).max(2).optional()
+  default_ddd: z.string().min(2).max(2).optional(),
+  instance_id: z.string().min(1)
 })
 
 export async function POST(request: Request) {
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Payload inválido." }, { status: 400 })
   }
 
-  const { rows, default_ddd } = parsed.data
+  const { rows, default_ddd, instance_id } = parsed.data
   const dedup = new Map<string, (typeof rows)[number]>()
   const invalidRows: typeof rows = []
 
@@ -53,6 +54,7 @@ export async function POST(request: Request) {
       (fullName ? fullName.split(" ")[0] : null)
 
     return {
+      instance_id,
       whatsapp_digits: digits,
       whatsapp_e164: normalized.e164,
       first_name: firstName,
@@ -79,7 +81,7 @@ export async function POST(request: Request) {
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("contacts")
-    .upsert(payload, { onConflict: "whatsapp_digits" })
+    .upsert(payload, { onConflict: "instance_id,whatsapp_digits" })
     .select("id, whatsapp_e164, full_name, first_name")
 
   if (error) {

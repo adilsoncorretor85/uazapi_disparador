@@ -9,6 +9,7 @@ export interface ContactFilters {
   opted_in?: string
   is_valid?: string
   tag?: string
+  instance_id?: string
 }
 
 export async function listContacts(filters: ContactFilters = {}) {
@@ -39,6 +40,10 @@ export async function listContacts(filters: ContactFilters = {}) {
 
   if (filters.tag) {
     query = query.contains("tags", [filters.tag])
+  }
+
+  if (filters.instance_id) {
+    query = query.eq("instance_id", filters.instance_id)
   }
 
   const { data, error } = await query

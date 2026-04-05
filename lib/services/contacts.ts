@@ -24,11 +24,16 @@ export interface ImportContactsResponse {
   contacts: Array<Pick<Contact, "id" | "whatsapp_e164" | "first_name" | "full_name">>
 }
 
-export async function importContacts(rows: ImportContactRow[], defaultDdd?: string) {
+export async function importContacts(
+  rows: ImportContactRow[],
+  instanceId: string,
+  defaultDdd?: string
+) {
   return apiFetch<ImportContactsResponse>("/api/contacts/import", {
     method: "POST",
     body: JSON.stringify({
       rows,
+      instance_id: instanceId,
       default_ddd: defaultDdd
     })
   })

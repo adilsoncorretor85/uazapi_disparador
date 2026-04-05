@@ -158,6 +158,8 @@ export async function updateCampaign(id: string, values: CampaignFormValues) {
       contact_id: contactId
     }))
     await supabase.from("campaign_contacts").insert(audiencePayload)
+  } else if (audience_source === "all") {
+    await supabase.from("campaign_contacts").delete().eq("campaign_id", id)
   }
 
   return data as Campaign

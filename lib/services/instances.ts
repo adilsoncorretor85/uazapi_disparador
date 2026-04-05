@@ -20,3 +20,15 @@ export async function updateInstance(id: string, values: InstanceFormValues) {
   })
 }
 
+export async function connectInstance(id: string) {
+  return apiFetch<Record<string, unknown>>(`/api/instances/${id}/connect`, {
+    method: "POST"
+  })
+}
+
+export async function disconnectInstance(id: string) {
+  return apiFetch<Record<string, unknown>>(`/api/instances/${id}/disconnect`, {
+    method: "POST"
+  })
+}
+

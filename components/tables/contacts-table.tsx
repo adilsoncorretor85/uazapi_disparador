@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Search } from "lucide-react"
 import { fetchContacts } from "@/lib/services/contacts"
+import { fetchInstances } from "@/lib/services/instances"
 import type { Contact } from "@/types/entities"
 import { Input } from "@/components/ui/input"
 import {
@@ -23,17 +24,24 @@ export default function ContactsTable() {
   const [tag, setTag] = useState("")
   const [optedIn, setOptedIn] = useState<string | undefined>(undefined)
   const [isValid, setIsValid] = useState<string | undefined>(undefined)
+  const [instanceId, setInstanceId] = useState("")
   const [selected, setSelected] = useState<Contact | null>(null)
 
+  const { data: instances } = useQuery({
+    queryKey: ["instances"],
+    queryFn: () => fetchInstances()
+  })
+
   const { data, isLoading } = useQuery({
-    queryKey: ["contacts", search, city, tag, optedIn, isValid],
+    queryKey: ["contacts", search, city, tag, optedIn, isValid, instanceId],
     queryFn: () =>
       fetchContacts({
         search,
         city,
         tag,
         opted_in: optedIn ?? "",
-        is_valid: isValid ?? ""
+        is_valid: isValid ?? "",
+        instance_id: instanceId
       })
   })
 
@@ -42,6 +50,20 @@ export default function ContactsTable() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
+        <Select value={instanceId} onValueChange={(value) => setInstanceId(value === "all" ? "" : value)}>
+          <SelectTrigger className="w-56">
+            <SelectValue placeholder="Instância" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas</SelectItem>
+            {instances?.map((instance) => (
+              <SelectItem key={instance.id} value={instance.id}>
+                {instance.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
         <div className="flex items-center gap-2 rounded-lg border bg-background/70 px-3 py-2">
           <Search className="h-4 w-4 text-muted-foreground" />
           <Input

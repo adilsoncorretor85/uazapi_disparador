@@ -291,6 +291,11 @@ export function CampaignForm({
     setImporting(true)
     setImportError(null)
     try {
+      const instanceId = form.getValues("instance_id")
+      if (!instanceId) {
+        throw new Error("Selecione uma instância antes de importar.")
+      }
+
       const buffer = await file.arrayBuffer()
       const workbook = XLSX.read(buffer, { type: "array" })
       const sheetName = workbook.SheetNames[0]
@@ -303,7 +308,7 @@ export function CampaignForm({
         throw new Error("Nenhum número válido encontrado no arquivo.")
       }
 
-      const result = await importContacts(mappedRows, defaultDdd)
+      const result = await importContacts(mappedRows, instanceId, defaultDdd)
       setImportSummary({
         total: mappedRows.length,
         inserted: result.inserted,
