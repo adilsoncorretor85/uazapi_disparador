@@ -53,6 +53,8 @@ export default function CampaignEdit() {
     readchat: Boolean(campaign.readchat),
     use_composing: Boolean(campaign.use_composing),
     use_randomizer: Boolean(campaign.use_randomizer),
+    audience_source: "all",
+    audience_contact_ids: [],
     variants: (variants ?? []).map((variant) => ({
       id: variant.id,
       sort_order: variant.sort_order,

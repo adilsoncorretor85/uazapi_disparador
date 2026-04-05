@@ -40,7 +40,9 @@ export const campaignFormSchema = z.object({
   readchat: z.boolean().default(false),
   use_composing: z.boolean().default(false),
   use_randomizer: z.boolean().default(false),
-  variants: z.array(campaignVariantSchema).optional().default([])
+  variants: z.array(campaignVariantSchema).optional().default([]),
+  audience_source: z.enum(["all", "file"]).optional().default("all"),
+  audience_contact_ids: z.array(z.string()).optional().default([])
 })
 
 export type CampaignFormValues = z.infer<typeof campaignFormSchema>

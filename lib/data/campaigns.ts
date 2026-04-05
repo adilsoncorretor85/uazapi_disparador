@@ -74,7 +74,8 @@ export async function getCampaign(id: string) {
 
 export async function createCampaign(values: CampaignFormValues) {
   const supabase = createServerClient()
-  const { variants, ...payload } = normalizeCampaignPayload(values)
+  const { variants, audience_contact_ids, audience_source, ...payload } =
+    normalizeCampaignPayload(values)
 
   const { data, error } = await supabase
     .from("campaigns")
@@ -102,12 +103,21 @@ export async function createCampaign(values: CampaignFormValues) {
     await supabase.from("campaign_message_variants").insert(variantPayload)
   }
 
+  if (audience_source === "file" && audience_contact_ids?.length) {
+    const audiencePayload = audience_contact_ids.map((contactId) => ({
+      campaign_id: data.id,
+      contact_id: contactId
+    }))
+    await supabase.from("campaign_contacts").insert(audiencePayload)
+  }
+
   return data as Campaign
 }
 
 export async function updateCampaign(id: string, values: CampaignFormValues) {
   const supabase = createServerClient()
-  const { variants, ...payload } = normalizeCampaignPayload(values)
+  const { variants, audience_contact_ids, audience_source, ...payload } =
+    normalizeCampaignPayload(values)
 
   const { data, error } = await supabase
     .from("campaigns")
@@ -139,6 +149,15 @@ export async function updateCampaign(id: string, values: CampaignFormValues) {
 
       await supabase.from("campaign_message_variants").insert(variantPayload)
     }
+  }
+
+  if (audience_source === "file" && audience_contact_ids?.length) {
+    await supabase.from("campaign_contacts").delete().eq("campaign_id", id)
+    const audiencePayload = audience_contact_ids.map((contactId) => ({
+      campaign_id: id,
+      contact_id: contactId
+    }))
+    await supabase.from("campaign_contacts").insert(audiencePayload)
   }
 
   return data as Campaign
