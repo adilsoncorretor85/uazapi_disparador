@@ -2,8 +2,12 @@
 import { KpiCard } from "@/components/common/kpi-card"
 import { PageHeader } from "@/components/common/page-header"
 import { Card } from "@/components/ui/card"
+import { getDashboardStats } from "@/lib/data/dashboard"
+import { formatNumber, formatPercent } from "@/lib/format"
 
-export default function DashboardPage() {
+export default async function DashboardPage() {
+  const stats = await getDashboardStats()
+
   return (
     <div className="space-y-8">
       <PageHeader
@@ -12,10 +16,32 @@ export default function DashboardPage() {
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard label="Campanhas ativas" value="4" icon={<Rocket className="h-4 w-4" />} />
-        <KpiCard label="Envios em fila" value="12.480" icon={<Activity className="h-4 w-4" />} />
-        <KpiCard label="Taxa de entrega" value="92,4%" tone="success" icon={<CheckCircle2 className="h-4 w-4" />} />
-        <KpiCard label="Contatos ativos" value="38.210" icon={<Users className="h-4 w-4" />} />
+        <KpiCard
+          label="Campanhas ativas"
+          value={formatNumber(stats.activeCampaigns)}
+          icon={<Rocket className="h-4 w-4" />}
+        />
+        <KpiCard
+          label="Envios em fila"
+          value={formatNumber(stats.queuedMessages)}
+          icon={<Activity className="h-4 w-4" />}
+        />
+        <KpiCard
+          label="Enviados"
+          value={formatNumber(stats.sentMessages)}
+          icon={<CheckCircle2 className="h-4 w-4" />}
+        />
+        <KpiCard
+          label="Taxa de entrega"
+          value={formatPercent(stats.deliveryRate)}
+          tone="success"
+          icon={<CheckCircle2 className="h-4 w-4" />}
+        />
+        <KpiCard
+          label="Contatos ativos"
+          value={formatNumber(stats.activeContacts)}
+          icon={<Users className="h-4 w-4" />}
+        />
       </div>
 
       <Card>

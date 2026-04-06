@@ -7,6 +7,14 @@ interface WhatsAppPreviewProps {
   message: string
   mediaType?: string | null
   mediaUrl?: string | null
+  linkPreview?: boolean
+  linkPreviewData?: {
+    url: string
+    title?: string
+    description?: string
+    image?: string
+    siteName?: string
+  }
   useRandomizer?: boolean
   variants?: Array<{ message_body: string; is_active?: boolean }>
 }
@@ -103,11 +111,27 @@ function renderWhatsAppText(text: string) {
   return nodes
 }
 
+function extractFirstUrl(text: string) {
+  const match = text.match(/https?:\/\/\S+/i)
+  return match?.[0] ?? null
+}
+
+function getDomain(url: string) {
+  try {
+    const parsed = new URL(url)
+    return parsed.hostname.replace(/^www\./i, "")
+  } catch {
+    return url
+  }
+}
+
 export function WhatsAppPreview({
   title = "Visualização",
   message,
   mediaType,
   mediaUrl,
+  linkPreview,
+  linkPreviewData,
   useRandomizer,
   variants
 }: WhatsAppPreviewProps) {
@@ -120,6 +144,16 @@ export function WhatsAppPreview({
 
   const showMedia = Boolean(mediaUrl && mediaType !== "none")
   const showPlaceholder = !hasMessage && !showMedia
+  const hasLinkPreview =
+    Boolean(linkPreview) && /https?:\/\//i.test(hasMessage ? message : baseMessage)
+  const previewUrl =
+    linkPreviewData?.url ??
+    (hasLinkPreview ? extractFirstUrl(hasMessage ? message : baseMessage) : null)
+  const previewDomain = previewUrl ? getDomain(previewUrl) : null
+  const previewTitle =
+    linkPreviewData?.title || linkPreviewData?.siteName || previewDomain || "Link"
+  const previewDescription = linkPreviewData?.description
+  const previewImage = linkPreviewData?.image
 
   return (
     <Card className="overflow-hidden">
@@ -155,6 +189,30 @@ export function WhatsAppPreview({
             </div>
           ) : (
             <div className="max-w-[85%] rounded-2xl bg-white px-3 py-2 text-sm shadow-sm">
+              {hasLinkPreview ? (
+                <div className="mb-2 overflow-hidden rounded-lg border">
+                  {previewImage ? (
+                    <img src={previewImage} alt="Preview" className="h-28 w-full object-cover" />
+                  ) : (
+                    <div className="flex h-20 items-center justify-center bg-black/5 text-[11px] text-muted-foreground">
+                      Previa do link
+                    </div>
+                  )}
+                  <div className="space-y-1 px-2 py-1">
+                    {previewTitle ? (
+                      <p className="text-[11px] font-semibold text-[#222]">{previewTitle}</p>
+                    ) : null}
+                    {previewDescription ? (
+                      <p className="text-[11px] text-muted-foreground line-clamp-2">
+                        {previewDescription}
+                      </p>
+                    ) : null}
+                    {previewUrl ? (
+                      <p className="text-[10px] text-muted-foreground">{previewUrl}</p>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               <div className="whitespace-pre-wrap leading-relaxed text-[#222]">
                 {renderWhatsAppText(showPlaceholder ? baseMessage : message)}
               </div>

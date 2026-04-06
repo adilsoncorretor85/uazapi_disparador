@@ -10,6 +10,14 @@ const importRowSchema = z.object({
   email: z.string().optional(),
   city: z.string().optional(),
   state: z.string().optional(),
+  bairro: z.string().optional(),
+  cep: z.string().optional(),
+  rua: z.string().optional(),
+  numero_residencia: z.string().optional(),
+  complemento: z.string().optional(),
+  ponto_referencia: z.string().optional(),
+  genero: z.string().optional(),
+  data_nascimento: z.string().optional(),
   tags: z.array(z.string()).optional(),
   custom_fields: z.record(z.any()).optional()
 })
@@ -62,8 +70,18 @@ export async function POST(request: Request) {
       email: row.email ?? null,
       city: row.city ?? null,
       state: row.state ?? null,
-      tags: row.tags ?? null,
-      custom_fields: row.custom_fields ?? null,
+      bairro: row.bairro ?? row.custom_fields?.bairro ?? null,
+      cep: row.cep ?? row.custom_fields?.cep ?? null,
+      rua: row.rua ?? row.custom_fields?.rua ?? null,
+      numero_residencia:
+        row.numero_residencia ?? row.custom_fields?.numero_residencia ?? null,
+      complemento: row.complemento ?? row.custom_fields?.complemento ?? null,
+      ponto_referencia:
+        row.ponto_referencia ?? row.custom_fields?.ponto_referencia ?? null,
+      genero: row.genero ?? row.custom_fields?.genero ?? null,
+      data_nascimento: row.data_nascimento ?? row.custom_fields?.data_nascimento ?? null,
+      tags: row.tags ?? [],
+      custom_fields: row.custom_fields ?? {},
       opted_in: true,
       is_valid: true
     }
@@ -79,19 +97,76 @@ export async function POST(request: Request) {
   }
 
   const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from("contacts")
-    .upsert(payload, { onConflict: "instance_id,whatsapp_digits" })
-    .select("id, whatsapp_e164, full_name, first_name")
+  const digitsList = payload
+    .map((row) => row.whatsapp_digits as string | undefined)
+    .filter(Boolean) as string[]
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  const existingRows: Array<{
+    id: string
+    whatsapp_e164: string
+    full_name: string | null
+    first_name: string | null
+    whatsapp_digits: string
+  }> = []
+
+  for (let i = 0; i < digitsList.length; i += 500) {
+    const chunk = digitsList.slice(i, i + 500)
+    const { data, error } = await supabase
+      .from("contacts")
+      .select("id, whatsapp_e164, full_name, first_name, whatsapp_digits")
+      .eq("instance_id", instance_id)
+      .in("whatsapp_digits", chunk)
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    if (data?.length) {
+      existingRows.push(...data)
+    }
   }
 
+  const existingMap = new Map(
+    existingRows.map((row) => [row.whatsapp_digits, row])
+  )
+
+  const toInsert = payload.filter((row) => {
+    const digits = row.whatsapp_digits as string | undefined
+    return digits ? !existingMap.has(digits) : false
+  })
+
+  let insertedRows: Array<{
+    id: string
+    whatsapp_e164: string
+    full_name: string | null
+    first_name: string | null
+    whatsapp_digits: string
+  }> = []
+
+  if (toInsert.length > 0) {
+    const { data, error } = await supabase
+      .from("contacts")
+      .insert(toInsert)
+      .select("id, whatsapp_e164, full_name, first_name, whatsapp_digits")
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    insertedRows = data ?? []
+  }
+
+  const contacts = [...existingRows, ...insertedRows].map((row) => ({
+    id: row.id,
+    whatsapp_e164: row.whatsapp_e164,
+    full_name: row.full_name,
+    first_name: row.first_name
+  }))
+
   return NextResponse.json({
-    inserted: data?.length ?? 0,
+    inserted: insertedRows.length,
     updated: 0,
-    ignored: invalidRows.length,
-    contacts: data ?? []
+    ignored: invalidRows.length + existingRows.length,
+    contacts
   })
 }

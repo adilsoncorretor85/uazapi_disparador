@@ -32,14 +32,27 @@ export default function CampaignMessagesTable({ campaignId }: CampaignMessagesTa
   const [delivered, setDelivered] = useState<string | undefined>(undefined)
   const [read, setRead] = useState<string | undefined>(undefined)
   const [failed, setFailed] = useState<string | undefined>(undefined)
+  const [processed, setProcessed] = useState<string | undefined>(undefined)
   const [from, setFrom] = useState("")
   const [to, setTo] = useState("")
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<CampaignMessageWithContact | null>(null)
 
   const queryKey = useMemo(
-    () => ["campaign-messages", campaignId, search, status, delivered, read, failed, from, to, page],
-    [campaignId, search, status, delivered, read, failed, from, to, page]
+    () => [
+      "campaign-messages",
+      campaignId,
+      search,
+      status,
+      delivered,
+      read,
+      failed,
+      processed,
+      from,
+      to,
+      page
+    ],
+    [campaignId, search, status, delivered, read, failed, processed, from, to, page]
   )
 
   const { data, isLoading } = useQuery({
@@ -51,6 +64,7 @@ export default function CampaignMessagesTable({ campaignId }: CampaignMessagesTa
         delivered: delivered ?? "",
         read: read ?? "",
         failed: failed ?? "",
+        processed: processed ?? "",
         from,
         to,
         page: String(page),
@@ -127,6 +141,20 @@ export default function CampaignMessagesTable({ campaignId }: CampaignMessagesTa
           </SelectContent>
         </Select>
 
+        <Select
+          value={processed}
+          onValueChange={(value) => setProcessed(value === "all" ? undefined : value)}
+        >
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="Processado" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos</SelectItem>
+            <SelectItem value="true">Sim</SelectItem>
+            <SelectItem value="false">Não</SelectItem>
+          </SelectContent>
+        </Select>
+
         <div className="flex items-center gap-2">
           <Calendar className="h-4 w-4 text-muted-foreground" />
           <Input type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
@@ -149,6 +177,7 @@ export default function CampaignMessagesTable({ campaignId }: CampaignMessagesTa
             <TableHead>Tentativas</TableHead>
             <TableHead>Entregue</TableHead>
             <TableHead>Lido</TableHead>
+            <TableHead>Processado</TableHead>
             <TableHead>Enviado</TableHead>
             <TableHead>Falha</TableHead>
             <TableHead>Ações</TableHead>
@@ -157,11 +186,11 @@ export default function CampaignMessagesTable({ campaignId }: CampaignMessagesTa
         <TableBody>
           {isLoading ? (
             <TableRow>
-              <TableCell colSpan={14}>Carregando envios...</TableCell>
+              <TableCell colSpan={15}>Carregando envios...</TableCell>
             </TableRow>
           ) : messages.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={14}>Nenhum envio encontrado.</TableCell>
+              <TableCell colSpan={15}>Nenhum envio encontrado.</TableCell>
             </TableRow>
           ) : (
             messages.map((message) => (
@@ -188,6 +217,7 @@ export default function CampaignMessagesTable({ campaignId }: CampaignMessagesTa
                 <TableCell>{message.attempt_count ?? 0}</TableCell>
                 <TableCell>{message.is_delivered ? "Sim" : "Não"}</TableCell>
                 <TableCell>{message.is_read ? "Sim" : "Não"}</TableCell>
+                <TableCell>{message.processed ? "Sim" : "Não"}</TableCell>
                 <TableCell>{formatDateTime(message.sent_at)}</TableCell>
                 <TableCell>{message.failed_at ? formatDateTime(message.failed_at) : "-"}</TableCell>
                 <TableCell>
@@ -242,6 +272,14 @@ export default function CampaignMessagesTable({ campaignId }: CampaignMessagesTa
                   <div>
                     <p className="text-xs text-muted-foreground">Status provider</p>
                     <p className="text-sm">{selected.provider_status ?? "-"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Processado pelo N8N</p>
+                    <p className="text-sm">{selected.processed ? "Sim" : "Não"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Processado em</p>
+                    <p className="text-sm">{formatDateTime(selected.processed_at)}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Enviado em</p>

@@ -15,6 +15,7 @@ import {
   StopCircle
 } from "lucide-react"
 import { duplicateCampaign, fetchCampaigns, runCampaignAction } from "@/lib/services/campaigns"
+import { fetchInstances } from "@/lib/services/instances"
 import { formatDateTime, formatNumber } from "@/lib/format"
 import { CAMPAIGN_STATUS_LABELS } from "@/lib/constants/status"
 import { Card } from "@/components/ui/card"
@@ -59,6 +60,11 @@ export default function CampaignsList() {
       })
   })
 
+  const { data: instances } = useQuery({
+    queryKey: ["instances"],
+    queryFn: () => fetchInstances()
+  })
+
   const actionMutation = useMutation({
     mutationFn: async ({ id, action }: { id: string; action: string }) => {
       if (action === "duplicate") {
@@ -76,6 +82,13 @@ export default function CampaignsList() {
 
   const campaigns = data?.data ?? []
   const summary = data?.summary
+  const instanceMap = useMemo(
+    () =>
+      new Map(
+        (instances ?? []).map((instance) => [instance.id, instance.name])
+      ),
+    [instances]
+  )
 
   return (
     <div className="space-y-6">
@@ -96,7 +109,7 @@ export default function CampaignsList() {
             placeholder="Buscar por título"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            className="max-w-xs"
+            className="w-full sm:max-w-xs"
           />
 
           <Select value={status} onValueChange={(value) => setStatus(value === "all" ? undefined : value)}>
@@ -154,7 +167,15 @@ export default function CampaignsList() {
                 <TableCell colSpan={12}>Nenhuma campanha encontrada.</TableCell>
               </TableRow>
             ) : (
-              campaigns.map((campaign) => (
+              campaigns.map((campaign) => {
+                const displayStatus = campaign.derived_status ?? campaign.status
+                const canEdit =
+                  displayStatus === "draft" ||
+                  displayStatus === "scheduled" ||
+                  displayStatus === "paused"
+                const canPause = displayStatus === "processing"
+                const canResume = displayStatus === "paused"
+                return (
                 <TableRow key={campaign.id}>
                   <TableCell>
                     <div>
@@ -164,14 +185,18 @@ export default function CampaignsList() {
                   </TableCell>
                   <TableCell>
                     <StatusBadge
-                      status={campaign.status}
-                      label={CAMPAIGN_STATUS_LABELS[campaign.status]}
+                      status={displayStatus}
+                      label={CAMPAIGN_STATUS_LABELS[displayStatus]}
                     />
                   </TableCell>
                   <TableCell>
-                    <Badge variant="secondary">{campaign.instance_id}</Badge>
+                    <Badge variant="secondary">
+                      {instanceMap.get(campaign.instance_id) ?? campaign.instance_id}
+                    </Badge>
                   </TableCell>
-                  <TableCell>{campaign.media_type ?? "Texto"}</TableCell>
+                  <TableCell>
+                    {campaign.link_preview ? "Link" : campaign.media_type ?? "Texto"}
+                  </TableCell>
                   <TableCell>{formatDateTime(campaign.scheduled_at)}</TableCell>
                   <TableCell>{formatNumber(campaign.total_numbers ?? 0)}</TableCell>
                   <TableCell>{formatNumber(campaign.total_sent ?? 0)}</TableCell>
@@ -194,30 +219,36 @@ export default function CampaignsList() {
                             Ver detalhes
                           </Link>
                         </DropdownMenuItem>
-                        <DropdownMenuItem asChild>
-                          <Link href={`/campaigns/${campaign.id}/edit`}>
-                            <Pencil className="mr-2 h-4 w-4" />
-                            Editar
-                          </Link>
-                        </DropdownMenuItem>
+                        {canEdit ? (
+                          <DropdownMenuItem asChild>
+                            <Link href={`/campaigns/${campaign.id}/edit`}>
+                              <Pencil className="mr-2 h-4 w-4" />
+                              Editar
+                            </Link>
+                          </DropdownMenuItem>
+                        ) : null}
                         <DropdownMenuItem
                           onClick={() => actionMutation.mutate({ id: campaign.id, action: "duplicate" })}
                         >
                           <Copy className="mr-2 h-4 w-4" />
                           Duplicar
                         </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => actionMutation.mutate({ id: campaign.id, action: "pause" })}
-                        >
-                          <CirclePause className="mr-2 h-4 w-4" />
-                          Pausar
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => actionMutation.mutate({ id: campaign.id, action: "resume" })}
-                        >
-                          <PlayCircle className="mr-2 h-4 w-4" />
-                          Continuar
-                        </DropdownMenuItem>
+                        {canPause ? (
+                          <DropdownMenuItem
+                            onClick={() => actionMutation.mutate({ id: campaign.id, action: "pause" })}
+                          >
+                            <CirclePause className="mr-2 h-4 w-4" />
+                            Pausar
+                          </DropdownMenuItem>
+                        ) : null}
+                        {canResume ? (
+                          <DropdownMenuItem
+                            onClick={() => actionMutation.mutate({ id: campaign.id, action: "resume" })}
+                          >
+                            <PlayCircle className="mr-2 h-4 w-4" />
+                            Continuar
+                          </DropdownMenuItem>
+                        ) : null}
                         <DropdownMenuItem
                           className="text-destructive"
                           onClick={() => actionMutation.mutate({ id: campaign.id, action: "cancel" })}
@@ -229,7 +260,8 @@ export default function CampaignsList() {
                     </DropdownMenu>
                   </TableCell>
                 </TableRow>
-              ))
+                )
+              })
             )}
           </TableBody>
         </Table>

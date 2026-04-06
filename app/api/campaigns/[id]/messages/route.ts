@@ -12,6 +12,7 @@ export async function GET(
     delivered: searchParams.get("delivered") ?? undefined,
     read: searchParams.get("read") ?? undefined,
     failed: searchParams.get("failed") ?? undefined,
+    processed: searchParams.get("processed") ?? undefined,
     from: searchParams.get("from") ?? undefined,
     to: searchParams.get("to") ?? undefined,
     page: searchParams.get("page") ? Number(searchParams.get("page")) : 1,

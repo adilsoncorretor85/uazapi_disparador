@@ -9,6 +9,7 @@ export interface MessageFilters {
   delivered?: string
   read?: string
   failed?: string
+  processed?: string
   from?: string
   to?: string
   page?: number
@@ -61,6 +62,10 @@ export async function listCampaignMessages(
 
     if (filters.failed === "true") {
       query = query.eq("status", "failed")
+    }
+
+    if (filters.processed) {
+      query = query.eq("processed", filters.processed === "true")
     }
 
     if (filters.from) {

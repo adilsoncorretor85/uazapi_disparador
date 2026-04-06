@@ -1,4 +1,5 @@
 ﻿import { createServerClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { env } from "@/lib/env"
 import { mockVariants } from "@/lib/mocks/variants"
 import type { CampaignMessageVariant } from "@/types/entities"
@@ -9,11 +10,12 @@ interface VariantUsageRow {
 }
 
 export async function listCampaignVariants(campaignId: string) {
-  if (!env.NEXT_PUBLIC_SUPABASE_URL || !env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+  if (!env.NEXT_PUBLIC_SUPABASE_URL) {
     return mockVariants
   }
 
-  const supabase = createServerClient()
+  const supabase =
+    env.SUPABASE_SERVICE_ROLE_KEY ? createAdminClient() : createServerClient()
   const { data, error } = await supabase
     .from("campaign_message_variants")
     .select("*")
@@ -21,7 +23,7 @@ export async function listCampaignVariants(campaignId: string) {
     .order("sort_order", { ascending: true })
 
   if (error || !data) {
-    return mockVariants
+    return []
   }
 
   const { data: usageData, error: usageError } = await supabase

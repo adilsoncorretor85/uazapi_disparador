@@ -6,21 +6,32 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import { CampaignForm } from "@/components/forms/campaign-form"
 import { fetchCampaign, fetchCampaignVariants, updateCampaign } from "@/lib/services/campaigns"
 import type { CampaignFormValues } from "@/lib/schemas/campaign"
-import { AlertCircle } from "lucide-react"
 
 export default function CampaignEdit() {
   const params = useParams<{ id: string }>()
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
 
-  const { data: campaign, isLoading } = useQuery({
-    queryKey: ["campaign", params.id],
-    queryFn: () => fetchCampaign(params.id)
+  const campaignId = params.id
+
+  const {
+    data: campaign,
+    isLoading: isCampaignLoading,
+    error: campaignError
+  } = useQuery({
+    queryKey: ["campaign", campaignId],
+    queryFn: () => fetchCampaign(campaignId),
+    enabled: Boolean(campaignId)
   })
 
-  const { data: variants } = useQuery({
-    queryKey: ["campaign-variants", params.id],
-    queryFn: () => fetchCampaignVariants(params.id)
+  const {
+    data: variants,
+    isLoading: isVariantsLoading,
+    error: variantsError
+  } = useQuery({
+    queryKey: ["campaign-variants", campaignId],
+    queryFn: () => fetchCampaignVariants(campaignId),
+    enabled: Boolean(campaignId)
   })
 
   const mutation = useMutation({
@@ -32,7 +43,11 @@ export default function CampaignEdit() {
     onError: (err: Error) => setError(err.message)
   })
 
-  if (isLoading || !campaign) {
+  if (campaignError || variantsError) {
+    return <p>Erro ao carregar a campanha. Tente novamente.</p>
+  }
+
+  if (isCampaignLoading || isVariantsLoading || !campaign) {
     return <p>Carregando campanha...</p>
   }
 
@@ -55,8 +70,13 @@ export default function CampaignEdit() {
     use_randomizer: Boolean(campaign.use_randomizer),
     audience_source: "all",
     audience_contact_ids: [],
+    audience_tags: campaign.audience_tags ?? [],
+    audience_tags_exclude: campaign.audience_tags_exclude ?? [],
+    audience_cities: campaign.audience_cities ?? [],
+    audience_bairros: campaign.audience_bairros ?? [],
+    audience_ruas: campaign.audience_ruas ?? [],
     variants: (variants ?? []).map((variant) => ({
-      id: variant.id,
+      id: String(variant.id),
       sort_order: variant.sort_order,
       message_body: variant.message_body,
       is_active: variant.is_active,
@@ -66,16 +86,10 @@ export default function CampaignEdit() {
 
   return (
     <div className="space-y-4">
-      {error ? (
-        <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
-          <AlertCircle className="h-4 w-4" />
-          {error}
-        </div>
-      ) : null}
-
       <CampaignForm
         mode="edit"
         isSubmitting={mutation.isPending}
+        submitError={error}
         initialData={initialData}
         onSubmit={async (values) => {
           await mutation.mutateAsync(values)

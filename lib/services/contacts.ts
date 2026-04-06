@@ -24,6 +24,13 @@ export interface ImportContactsResponse {
   contacts: Array<Pick<Contact, "id" | "whatsapp_e164" | "first_name" | "full_name">>
 }
 
+export interface ContactFilterOptions {
+  tags: string[]
+  cities: string[]
+  bairros: string[]
+  ruas: string[]
+}
+
 export async function importContacts(
   rows: ImportContactRow[],
   instanceId: string,
@@ -37,4 +44,21 @@ export async function importContacts(
       default_ddd: defaultDdd
     })
   })
+}
+
+export interface ContactFilterParams {
+  citySearch?: string
+  city?: string
+  bairro?: string
+}
+
+export async function fetchContactFilterOptions(
+  instanceId: string,
+  params: ContactFilterParams = {}
+) {
+  const query = new URLSearchParams({ instance_id: instanceId })
+  if (params.citySearch) query.set("city_search", params.citySearch)
+  if (params.city) query.set("city", params.city)
+  if (params.bairro) query.set("bairro", params.bairro)
+  return apiFetch<ContactFilterOptions>(`/api/contacts/options?${query.toString()}`)
 }

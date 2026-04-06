@@ -1,4 +1,5 @@
-﻿import { createServerClient } from "@/lib/supabase/server"
+import { createServerClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { env } from "@/lib/env"
 import { mockContacts } from "@/lib/mocks/contacts"
 import type { Contact } from "@/types/entities"
@@ -13,11 +14,20 @@ export interface ContactFilters {
 }
 
 export async function listContacts(filters: ContactFilters = {}) {
-  if (!env.NEXT_PUBLIC_SUPABASE_URL || !env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+  if (!env.NEXT_PUBLIC_SUPABASE_URL) {
     return mockContacts
   }
 
-  const supabase = createServerClient()
+  const supabase = env.SUPABASE_SERVICE_ROLE_KEY
+    ? createAdminClient()
+    : env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+      ? createServerClient()
+      : null
+
+  if (!supabase) {
+    return mockContacts
+  }
+
   let query = supabase.from("contacts").select("*").order("full_name")
 
   if (filters.search) {
@@ -54,4 +64,3 @@ export async function listContacts(filters: ContactFilters = {}) {
 
   return data as Contact[]
 }
-

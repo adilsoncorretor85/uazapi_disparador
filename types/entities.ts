@@ -3,13 +3,18 @@
 export interface WhatsAppInstance {
   id: string
   name: string
-  provider: string
-  base_url: string
+  provider?: string
+  base_url?: string | null
   token?: string | null
   instance_name: string
   owner_number: string
   webhook_secret?: string | null
   descricao?: string | null
+  cep?: string | null
+  rua?: string | null
+  bairro?: string | null
+  numero_residencia?: string | null
+  complemento?: string | null
   cidade?: string | null
   estado?: string | null
   acessores?: string[] | null
@@ -19,8 +24,8 @@ export interface WhatsAppInstance {
   campanha_horario_pause?: string | null
   campanha_horario_reinicio?: string | null
   is_active: boolean
-  send_readchat: boolean
-  send_composing: boolean
+  send_readchat?: boolean | null
+  send_composing?: boolean | null
   throttle_per_minute: number | null
 }
 
@@ -34,6 +39,14 @@ export interface Contact {
   email?: string | null
   city?: string | null
   state?: string | null
+  bairro?: string | null
+  cep?: string | null
+  rua?: string | null
+  numero_residencia?: string | null
+  complemento?: string | null
+  ponto_referencia?: string | null
+  genero?: string | null
+  data_nascimento?: string | null
   tags?: string[] | null
   custom_fields?: Record<string, string> | null
   opted_in?: boolean | null
@@ -57,17 +70,30 @@ export interface Campaign {
   started_at?: string | null
   completed_at?: string | null
   timezone?: string | null
+  audience_tags?: string[] | null
+  audience_tags_exclude?: string[] | null
+  audience_cities?: string[] | null
+  audience_bairros?: string[] | null
+  audience_ruas?: string[] | null
   delay_min_seconds?: number | null
   delay_max_seconds?: number | null
   batch_size?: number | null
   max_attempts?: number | null
   readchat?: boolean | null
   use_composing?: boolean | null
+  typing_delay_seconds?: number | null
+  link_preview?: boolean | null
+  link_preview_title?: string | null
+  link_preview_description?: string | null
+  link_preview_image?: string | null
+  link_preview_large?: boolean | null
   total_numbers?: number | null
+  total_processed?: number | null
   total_sent?: number | null
   total_delivered?: number | null
   total_read?: number | null
   total_failed?: number | null
+  derived_status?: CampaignStatus | null
   created_at?: string | null
   updated_at?: string | null
 }
@@ -97,6 +123,14 @@ export interface CampaignMessage {
   media_url?: string | null
   provider_message_id?: string | null
   provider_status?: string | null
+  link_preview?: boolean | null
+  link_preview_title?: string | null
+  link_preview_description?: string | null
+  link_preview_image?: string | null
+  link_preview_large?: boolean | null
+  typing_delay_seconds?: number | null
+  processed?: boolean | null
+  processed_at?: string | null
   status: MessageStatus
   attempt_count?: number | null
   is_delivered?: boolean | null

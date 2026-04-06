@@ -15,8 +15,10 @@ import {
   Mic,
   Video,
   FileText,
+  Link2,
   Users,
-  Upload
+  Upload,
+  AlertCircle
 } from "lucide-react"
 
 import {
@@ -24,7 +26,7 @@ import {
   type CampaignFormValues
 } from "@/lib/schemas/campaign"
 import { fetchInstances } from "@/lib/services/instances"
-import { importContacts } from "@/lib/services/contacts"
+import { fetchContactFilterOptions, importContacts } from "@/lib/services/contacts"
 import { uploadMedia } from "@/lib/services/storage"
 import { formatNumber } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -49,6 +51,8 @@ import {
   SelectValue
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { WhatsAppMessageEditor } from "@/components/common/whatsapp-message-editor"
 import { WhatsAppPreview } from "@/components/common/whatsapp-preview"
 
@@ -57,7 +61,10 @@ interface CampaignFormProps {
   onSubmit: (values: CampaignFormValues) => Promise<void>
   mode?: "create" | "edit"
   isSubmitting?: boolean
+  submitError?: string | null
 }
+
+const DEFAULT_TIMEZONE = "America/Sao_Paulo"
 
 const defaultValues: CampaignFormValues = {
   title: "",
@@ -65,10 +72,12 @@ const defaultValues: CampaignFormValues = {
   instance_id: "",
   status: "draft",
   scheduled_at: null,
-  timezone: "America/Sao_Paulo",
+  timezone: DEFAULT_TIMEZONE,
   media_type: "none",
   media_url: "",
   message_body: "",
+  link_preview: false,
+  typing_delay_seconds: 6,
   delay_min_seconds: 5,
   delay_max_seconds: 20,
   batch_size: 50,
@@ -77,29 +86,91 @@ const defaultValues: CampaignFormValues = {
   use_composing: false,
   use_randomizer: false,
   variants: [],
+  audience_tags: [],
+  audience_tags_exclude: [],
+  audience_cities: [],
+  audience_bairros: [],
+  audience_ruas: [],
   audience_source: "all",
   audience_contact_ids: []
 }
 
-function toDateTimeLocal(value?: string | null) {
+const pad2 = (num: number) => String(num).padStart(2, "0")
+
+function getTimeZoneParts(date: Date, timeZone: string) {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  })
+  const parts = formatter.formatToParts(date)
+  const map: Record<string, string> = {}
+  parts.forEach((part) => {
+    if (part.type !== "literal") {
+      map[part.type] = part.value
+    }
+  })
+  return {
+    year: Number(map.year),
+    month: Number(map.month),
+    day: Number(map.day),
+    hour: Number(map.hour),
+    minute: Number(map.minute)
+  }
+}
+
+function formatDateTimeInTimeZone(value?: string | null, timeZone = DEFAULT_TIMEZONE) {
   if (!value) return ""
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  const pad = (num: number) => String(num).padStart(2, "0")
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
-    date.getHours()
-  )}:${pad(date.getMinutes())}`
+  const parts = getTimeZoneParts(date, timeZone)
+  return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}T${pad2(
+    parts.hour
+  )}:${pad2(parts.minute)}`
 }
 
-function splitDateTime(value?: string | null) {
+function splitDateTimeInTimeZone(value?: string | null, timeZone = DEFAULT_TIMEZONE) {
   if (!value) return { date: "", time: "" }
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return { date: "", time: "" }
-  const pad = (num: number) => String(num).padStart(2, "0")
+  const parts = getTimeZoneParts(date, timeZone)
   return {
-    date: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
-    time: `${pad(date.getHours())}:${pad(date.getMinutes())}`
+    date: `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`,
+    time: `${pad2(parts.hour)}:${pad2(parts.minute)}`
   }
+}
+
+function dateTimeInTimeZoneToUtcIso(
+  dateValue: string,
+  timeValue: string,
+  timeZone = DEFAULT_TIMEZONE
+) {
+  if (!dateValue || !timeValue) return null
+  const [year, month, day] = dateValue.split("-").map(Number)
+  const [hour, minute] = timeValue.split(":").map(Number)
+  if (
+    [year, month, day, hour, minute].some((value) => Number.isNaN(value))
+  ) {
+    return null
+  }
+
+  const utcGuess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0))
+  const actual = getTimeZoneParts(utcGuess, timeZone)
+  const actualUtc = Date.UTC(
+    actual.year,
+    actual.month - 1,
+    actual.day,
+    actual.hour,
+    actual.minute,
+    0
+  )
+  const intendedUtc = Date.UTC(year, month - 1, day, hour, minute, 0)
+  const diffMs = intendedUtc - actualUtc
+  return new Date(utcGuess.getTime() + diffMs).toISOString()
 }
 
 const TEMPLATE_HEADERS = [
@@ -129,6 +200,7 @@ function normalizeHeader(value: string) {
 }
 
 const TEMPLATE_HEADERS_NORMALIZED = TEMPLATE_HEADERS.map(normalizeHeader)
+const MAX_VIDEO_BYTES = 64 * 1024 * 1024
 
 function validateTemplateHeaders(headerRow: unknown[]) {
   const normalized = headerRow
@@ -144,6 +216,32 @@ function normalizeRowKeys(row: Record<string, unknown>) {
     normalized[normalizeHeader(key)] = value
   })
   return normalized
+}
+
+function findFirstErrorMessage(errors: Record<string, unknown>): string | null {
+  for (const value of Object.values(errors)) {
+    if (!value) continue
+    if (typeof value === "object" && "message" in (value as Record<string, unknown>)) {
+      const message = (value as { message?: string }).message
+      if (typeof message === "string" && message) return message
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item && typeof item === "object" && "message" in item) {
+          const msg = (item as { message?: string }).message
+          if (typeof msg === "string" && msg) return msg
+        }
+        if (item && typeof item === "object") {
+          const nested = findFirstErrorMessage(item as Record<string, unknown>)
+          if (nested) return nested
+        }
+      }
+    } else if (typeof value === "object") {
+      const nested = findFirstErrorMessage(value as Record<string, unknown>)
+      if (nested) return nested
+    }
+  }
+  return null
 }
 
 function parseTags(value?: string) {
@@ -167,6 +265,14 @@ function mapImportRows(rows: Record<string, unknown>[]) {
       const city = String(row.cidade ?? "").trim() || undefined
       const state = String(row.estado ?? "").trim() || undefined
       const tags = parseTags(String(row.tags ?? "").trim())
+      const bairro = String(row.bairro ?? "").trim() || undefined
+      const cep = String(row.cep ?? "").trim() || undefined
+      const rua = String(row.rua ?? "").trim() || undefined
+      const numero_residencia = String(row.numero_residencia ?? "").trim() || undefined
+      const complemento = String(row.complemento ?? "").trim() || undefined
+      const ponto_referencia = String(row.ponto_referencia ?? "").trim() || undefined
+      const genero = String(row.genero ?? "").trim() || undefined
+      const data_nascimento = String(row.data_nascimento ?? "").trim() || undefined
 
       const custom_fields: Record<string, unknown> = {}
       const customKeys = [
@@ -194,6 +300,14 @@ function mapImportRows(rows: Record<string, unknown>[]) {
         email,
         city,
         state,
+        bairro,
+        cep,
+        rua,
+        numero_residencia,
+        complemento,
+        ponto_referencia,
+        genero,
+        data_nascimento,
         tags,
         custom_fields: Object.keys(custom_fields).length ? custom_fields : undefined
       }
@@ -205,21 +319,40 @@ export function CampaignForm({
   initialData,
   onSubmit,
   mode = "create",
-  isSubmitting
+  isSubmitting,
+  submitError
 }: CampaignFormProps) {
+  const resolvedInitial = useMemo(
+    () =>
+      initialData
+        ? {
+            ...defaultValues,
+            ...initialData,
+            timezone: DEFAULT_TIMEZONE,
+            media_type: initialData.link_preview
+              ? "link"
+              : initialData.media_type ?? "none"
+          }
+        : defaultValues,
+    [initialData]
+  )
+
   const form = useForm<CampaignFormValues>({
     resolver: zodResolver(campaignFormSchema),
-    defaultValues: initialData ?? defaultValues
+    defaultValues: resolvedInitial
   })
 
-  const submitActionRef = useRef<"publish" | "draft">("publish")
+  const hasInitializedRef = useRef(false)
+
+  const submitActionRef = useRef<"publish" | "draft" | "keep">("publish")
   const mediaInputRef = useRef<HTMLInputElement | null>(null)
-  const initialSchedule = splitDateTime(initialData?.scheduled_at ?? null)
+  const initialSchedule = splitDateTimeInTimeZone(initialData?.scheduled_at ?? null)
   const [scheduleMode, setScheduleMode] = useState<"now" | "schedule">(
     initialData?.scheduled_at ? "schedule" : "now"
   )
   const [scheduleDate, setScheduleDate] = useState(initialSchedule.date)
   const [scheduleTime, setScheduleTime] = useState(initialSchedule.time)
+  const scheduleSyncRef = useRef(false)
   const [audienceMode, setAudienceMode] = useState<"all" | "file">(
     initialData?.audience_source ?? "all"
   )
@@ -234,11 +367,24 @@ export function CampaignForm({
     Array<{ id: string; whatsapp_e164: string; first_name?: string | null; full_name?: string | null }>
   >([])
   const [defaultDdd, setDefaultDdd] = useState("47")
+  const [linkPreviewData, setLinkPreviewData] = useState<{
+    url: string
+    title?: string
+    description?: string
+    image?: string
+    siteName?: string
+  } | null>(null)
+  const lastPreviewRef = useRef<string | null>(null)
 
   const { fields, append, remove, move } = useFieldArray({
     control: form.control,
     name: "variants"
   })
+
+  const watchedInstanceId = form.watch("instance_id")
+  const [citySearch, setCitySearch] = useState("")
+  const [debouncedCitySearch, setDebouncedCitySearch] = useState("")
+  const lastInstanceRef = useRef<string | null>(null)
 
   const { data: instances } = useQuery({
     queryKey: ["instances"],
@@ -247,25 +393,205 @@ export function CampaignForm({
 
   const watchValues = form.watch()
   const watchRandomizer = watchValues.use_randomizer
-  const messageBody = watchValues.message_body
+  const messageBody = watchValues.message_body ?? ""
   const mediaUrl = watchValues.media_url
   const mediaType = watchValues.media_type
+  const linkPreview = watchValues.link_preview
+  const typingDelay = watchValues.typing_delay_seconds ?? 0
+  const isAudio = mediaType === "audio"
   const [isUploading, setIsUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const busy = isSubmitting ?? form.formState.isSubmitting
   const scheduleEnabled = scheduleMode === "schedule"
+  const currentStatus = resolvedInitial.status ?? "draft"
+  const canPublishFromDraft = mode === "edit" && currentStatus === "draft"
+  const audienceTags = watchValues.audience_tags ?? []
+  const audienceTagsExclude = watchValues.audience_tags_exclude ?? []
+  const audienceCities = watchValues.audience_cities ?? []
+  const audienceBairros = watchValues.audience_bairros ?? []
+  const audienceRuas = watchValues.audience_ruas ?? []
+  const selectedCity = audienceCities[0] ?? ""
+  const selectedBairro = audienceBairros[0] ?? ""
+  const selectedRua = audienceRuas[0] ?? ""
+
+  const {
+    data: contactFilterOptions,
+    isLoading: isFilterOptionsLoading
+  } = useQuery({
+    queryKey: [
+      "contact-filter-options",
+      watchedInstanceId,
+      debouncedCitySearch,
+      selectedCity,
+      selectedBairro
+    ],
+    queryFn: () =>
+      fetchContactFilterOptions(watchedInstanceId as string, {
+        citySearch: debouncedCitySearch,
+        city: selectedCity || undefined,
+        bairro: selectedBairro || undefined
+      }),
+    enabled: audienceMode === "all" && Boolean(watchedInstanceId)
+  })
+
+  const filterOptions = contactFilterOptions ?? {
+    tags: [],
+    cities: [],
+    bairros: [],
+    ruas: []
+  }
+  const tagIncludeOptions = filterOptions.tags.filter(
+    (tag) => !audienceTagsExclude.includes(tag)
+  )
+  const tagExcludeOptions = filterOptions.tags.filter(
+    (tag) => !audienceTags.includes(tag)
+  )
+
+  const toggleArrayValue = (
+    fieldName:
+      | "audience_tags"
+      | "audience_tags_exclude"
+      | "audience_cities"
+      | "audience_bairros"
+      | "audience_ruas",
+    value: string
+  ) => {
+    const current = (form.getValues(fieldName) ?? []) as string[]
+    const exists = current.includes(value)
+    const next = exists ? current.filter((item) => item !== value) : [...current, value]
+    form.setValue(fieldName, next, { shouldDirty: true, shouldValidate: false })
+
+    if (!exists && fieldName === "audience_tags") {
+      const excluded = (form.getValues("audience_tags_exclude") ?? []) as string[]
+      if (excluded.includes(value)) {
+        form.setValue(
+          "audience_tags_exclude",
+          excluded.filter((item) => item !== value),
+          { shouldDirty: true, shouldValidate: false }
+        )
+      }
+    }
+
+    if (!exists && fieldName === "audience_tags_exclude") {
+      const included = (form.getValues("audience_tags") ?? []) as string[]
+      if (included.includes(value)) {
+        form.setValue(
+          "audience_tags",
+          included.filter((item) => item !== value),
+          { shouldDirty: true, shouldValidate: false }
+        )
+      }
+    }
+  }
+
+  const clearArrayValue = (
+    fieldName:
+      | "audience_tags"
+      | "audience_tags_exclude"
+      | "audience_cities"
+      | "audience_bairros"
+      | "audience_ruas"
+  ) => {
+    form.setValue(fieldName, [], { shouldDirty: true, shouldValidate: false })
+  }
+
+  const setSingleSelection = (
+    fieldName: "audience_cities" | "audience_bairros" | "audience_ruas",
+    value: string
+  ) => {
+    const current = (form.getValues(fieldName) ?? []) as string[]
+    const currentValue = current[0] ?? ""
+    const nextValue = currentValue === value ? "" : value
+    form.setValue(fieldName, nextValue ? [nextValue] : [], {
+      shouldDirty: true,
+      shouldValidate: false
+    })
+    return nextValue
+  }
+
+  const setCitySelection = (value: string) => {
+    const nextValue = setSingleSelection("audience_cities", value)
+    form.setValue("audience_bairros", [], { shouldDirty: true, shouldValidate: false })
+    form.setValue("audience_ruas", [], { shouldDirty: true, shouldValidate: false })
+    if (!nextValue) {
+      setCitySearch("")
+    }
+  }
+
+  const setBairroSelection = (value: string) => {
+    setSingleSelection("audience_bairros", value)
+    form.setValue("audience_ruas", [], { shouldDirty: true, shouldValidate: false })
+  }
+
+  const setRuaSelection = (value: string) => {
+    setSingleSelection("audience_ruas", value)
+  }
+
+  useEffect(() => {
+    if (!initialData) return
+    if (!hasInitializedRef.current || !form.formState.isDirty) {
+      form.reset(resolvedInitial)
+      const schedule = splitDateTimeInTimeZone(initialData.scheduled_at ?? null)
+      setScheduleMode(initialData.scheduled_at ? "schedule" : "now")
+      setScheduleDate(schedule.date)
+      setScheduleTime(schedule.time)
+      scheduleSyncRef.current = true
+      setAudienceMode(initialData.audience_source ?? "all")
+      hasInitializedRef.current = true
+    }
+  }, [initialData, resolvedInitial, form])
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setDebouncedCitySearch(citySearch.trim())
+    }, 300)
+    return () => clearTimeout(timeout)
+  }, [citySearch])
+
+  useEffect(() => {
+    if (!watchedInstanceId) {
+      lastInstanceRef.current = null
+      setCitySearch("")
+      setDebouncedCitySearch("")
+      return
+    }
+
+    if (lastInstanceRef.current && lastInstanceRef.current !== watchedInstanceId) {
+      form.setValue("audience_tags", [], { shouldDirty: true, shouldValidate: false })
+      form.setValue("audience_tags_exclude", [], { shouldDirty: true, shouldValidate: false })
+      form.setValue("audience_cities", [], { shouldDirty: true, shouldValidate: false })
+      form.setValue("audience_bairros", [], { shouldDirty: true, shouldValidate: false })
+      form.setValue("audience_ruas", [], { shouldDirty: true, shouldValidate: false })
+      setCitySearch("")
+      setDebouncedCitySearch("")
+    }
+
+    lastInstanceRef.current = watchedInstanceId
+  }, [watchedInstanceId, form])
+  const firstFormError = useMemo(
+    () => findFirstErrorMessage(form.formState.errors as Record<string, unknown>),
+    [form.formState.errors]
+  )
 
   useEffect(() => {
     if (!scheduleEnabled) {
-      form.setValue("scheduled_at", null, { shouldDirty: true, shouldValidate: true })
+      const shouldDirty = !scheduleSyncRef.current
+      form.setValue("scheduled_at", null, { shouldDirty, shouldValidate: true })
+      if (scheduleSyncRef.current) {
+        scheduleSyncRef.current = false
+      }
       return
     }
 
     if (scheduleDate && scheduleTime) {
-      form.setValue("scheduled_at", `${scheduleDate}T${scheduleTime}`, {
-        shouldDirty: true,
-        shouldValidate: true
-      })
+      const iso = dateTimeInTimeZoneToUtcIso(scheduleDate, scheduleTime)
+      if (iso) {
+        const shouldDirty = !scheduleSyncRef.current
+        form.setValue("scheduled_at", iso, { shouldDirty, shouldValidate: true })
+        if (scheduleSyncRef.current) {
+          scheduleSyncRef.current = false
+        }
+      }
     }
   }, [scheduleEnabled, scheduleDate, scheduleTime, form])
 
@@ -276,6 +602,12 @@ export function CampaignForm({
       setImportedContacts([])
       setImportSummary(null)
       setImportError(null)
+    } else {
+      form.setValue("audience_tags", [], { shouldDirty: true, shouldValidate: false })
+      form.setValue("audience_tags_exclude", [], { shouldDirty: true, shouldValidate: false })
+      form.setValue("audience_cities", [], { shouldDirty: true, shouldValidate: false })
+      form.setValue("audience_bairros", [], { shouldDirty: true, shouldValidate: false })
+      form.setValue("audience_ruas", [], { shouldDirty: true, shouldValidate: false })
     }
   }, [audienceMode, form])
 
@@ -295,11 +627,83 @@ export function CampaignForm({
   }, [mediaType])
 
   useEffect(() => {
-    if (mediaType === "none" && mediaUrl) {
+    if ((mediaType === "none" || mediaType === "link") && mediaUrl) {
       form.setValue("media_url", "", { shouldDirty: true, shouldValidate: true })
       setUploadError(null)
     }
   }, [mediaType, mediaUrl, form])
+
+  useEffect(() => {
+    if (mediaType === "link") {
+      if (!linkPreview) {
+        form.setValue("link_preview", true, { shouldDirty: true, shouldValidate: false })
+      }
+      return
+    }
+    if (linkPreview) {
+      form.setValue("link_preview", false, { shouldDirty: true, shouldValidate: false })
+    }
+  }, [mediaType, linkPreview, form])
+
+  useEffect(() => {
+    if (mediaType === "audio" && watchValues.use_randomizer) {
+      form.setValue("use_randomizer", false, { shouldDirty: true, shouldValidate: false })
+    }
+  }, [mediaType, watchValues.use_randomizer, form])
+
+  useEffect(() => {
+    if (!watchValues.use_composing) {
+      if ((watchValues.typing_delay_seconds ?? 0) !== 0) {
+        form.setValue("typing_delay_seconds", 0, { shouldDirty: true, shouldValidate: false })
+      }
+    } else if ((watchValues.typing_delay_seconds ?? 0) === 0) {
+      form.setValue("typing_delay_seconds", 6, { shouldDirty: true, shouldValidate: false })
+    }
+  }, [watchValues.use_composing, watchValues.typing_delay_seconds, form])
+
+  const linkUrl = useMemo(() => {
+    if (!linkPreview && mediaType !== "link") return null
+    const text = messageBody ?? ""
+    const match = text.match(/https?:\/\/\S+/i)
+    return match?.[0] ?? null
+  }, [linkPreview, mediaType, messageBody])
+
+  useEffect(() => {
+    if (!linkUrl) {
+      setLinkPreviewData(null)
+      lastPreviewRef.current = null
+      return
+    }
+    if (lastPreviewRef.current === linkUrl) {
+      return
+    }
+    lastPreviewRef.current = linkUrl
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => {
+      fetch(`/api/link-preview?url=${encodeURIComponent(linkUrl)}`, {
+        signal: controller.signal
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          setLinkPreviewData({
+            url: linkUrl,
+            title: data.title,
+            description: data.description,
+            image: data.image,
+            siteName: data.siteName
+          })
+        })
+        .catch(() => {
+          setLinkPreviewData({ url: linkUrl })
+        })
+    }, 200)
+
+    return () => {
+      clearTimeout(timeout)
+      controller.abort()
+    }
+  }, [linkUrl])
 
   const handleImportFile = async (file: File) => {
     setImporting(true)
@@ -351,12 +755,14 @@ export function CampaignForm({
     }
   }
 
+  const scheduledIso = scheduleEnabled
+    ? dateTimeInTimeZoneToUtcIso(scheduleDate, scheduleTime)
+    : null
+
   const summary = {
     title: watchValues.title,
     instance: instances?.find((inst) => inst.id === watchValues.instance_id)?.name ?? "-",
-    scheduled: watchValues.scheduled_at
-      ? toDateTimeLocal(watchValues.scheduled_at)
-      : "Sem agendamento",
+    scheduled: scheduledIso ? formatDateTimeInTimeZone(scheduledIso) : "Sem agendamento",
     delay: `${watchValues.delay_min_seconds ?? 0}s - ${watchValues.delay_max_seconds ?? 0}s`,
     batch: watchValues.batch_size ?? 0,
     maxAttempts: watchValues.max_attempts ?? 0,
@@ -365,11 +771,14 @@ export function CampaignForm({
 
   const contentOptions = [
     { value: "none", label: "Texto", icon: MessageSquare },
+    { value: "link", label: "Link", icon: Link2 },
     { value: "image", label: "Imagem", icon: ImageIcon },
     { value: "audio", label: "Áudio", icon: Mic },
     { value: "video", label: "Vídeo", icon: Video },
     { value: "document", label: "Documento", icon: FileText }
   ]
+
+  const audienceError = form.formState.errors.audience_contact_ids?.message
 
   return (
     <Form {...form}>
@@ -377,7 +786,26 @@ export function CampaignForm({
         className="grid gap-6 lg:grid-cols-[2fr_1fr]"
         onSubmit={form.handleSubmit(async (values) => {
           const payload: CampaignFormValues = { ...values }
-          const shouldSchedule = scheduleEnabled && Boolean(payload.scheduled_at)
+          const shouldSchedule = scheduleEnabled && Boolean(scheduledIso)
+
+          payload.timezone = DEFAULT_TIMEZONE
+          payload.scheduled_at = scheduleEnabled ? scheduledIso : null
+
+          if (scheduleEnabled && !scheduledIso) {
+            form.setError("scheduled_at", {
+              type: "manual",
+              message: "Informe uma data e horário válidos"
+            })
+            return
+          }
+
+          if (audienceMode === "file" && (payload.audience_contact_ids ?? []).length === 0) {
+            form.setError("audience_contact_ids", {
+              type: "manual",
+              message: "Importe a planilha para selecionar os contatos"
+            })
+            return
+          }
 
           if (mode === "create") {
             if (submitActionRef.current === "draft") {
@@ -391,14 +819,33 @@ export function CampaignForm({
             }
           }
 
-          if (mode === "edit" && submitActionRef.current === "draft") {
-            payload.status = "draft"
+          if (mode === "edit") {
+            if (submitActionRef.current === "draft") {
+              payload.status = "draft"
+              payload.scheduled_at = null
+            } else if (submitActionRef.current === "publish") {
+              payload.status = shouldSchedule ? "scheduled" : "processing"
+              if (!shouldSchedule) {
+                payload.scheduled_at = null
+              }
+            }
           }
 
           await onSubmit(payload)
         })}
       >
         <div className="space-y-6">
+          {submitError ? (
+            <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4" />
+              {submitError}
+            </div>
+          ) : form.formState.isSubmitted && firstFormError ? (
+            <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4" />
+              {firstFormError}
+            </div>
+          ) : null}
           <Card>
             <div className="space-y-4">
               <div>
@@ -523,7 +970,11 @@ export function CampaignForm({
                         <FormItem>
                           <FormLabel>Fuso horário</FormLabel>
                           <FormControl>
-                            <Input placeholder="America/Sao_Paulo" {...field} />
+                            <Input
+                              placeholder={DEFAULT_TIMEZONE}
+                              readOnly
+                              {...field}
+                            />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -584,6 +1035,258 @@ export function CampaignForm({
                 </button>
               </div>
 
+              {audienceMode === "all" ? (
+                <div className="space-y-4">
+                  <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+                    Selecione filtros para segmentar a base. Sem filtros, a campanha
+                    será enviada para todos os contatos válidos da instância.
+                  </div>
+
+                  {!watchedInstanceId ? (
+                    <p className="text-sm text-muted-foreground">
+                      Selecione uma instância para carregar os filtros disponíveis.
+                    </p>
+                  ) : isFilterOptionsLoading ? (
+                    <p className="text-sm text-muted-foreground">Carregando filtros...</p>
+                  ) : (
+                    <>
+                      <div className="grid gap-4 lg:grid-cols-2">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-semibold">Tags incluídas</p>
+                            {audienceTags.length > 0 ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => clearArrayValue("audience_tags")}
+                              >
+                                Limpar
+                              </Button>
+                            ) : null}
+                          </div>
+                          {tagIncludeOptions.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">
+                              Nenhuma tag cadastrada.
+                            </p>
+                          ) : (
+                            <div className="flex flex-wrap gap-2">
+                              {tagIncludeOptions.map((tag) => (
+                                <button
+                                  key={`tag-${tag}`}
+                                  type="button"
+                                  className="focus:outline-none"
+                                  onClick={() => toggleArrayValue("audience_tags", tag)}
+                                >
+                                  <Badge
+                                    variant={audienceTags.includes(tag) ? "default" : "secondary"}
+                                  >
+                                    {tag}
+                                  </Badge>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-semibold">Tags excluídas</p>
+                            {audienceTagsExclude.length > 0 ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => clearArrayValue("audience_tags_exclude")}
+                              >
+                                Limpar
+                              </Button>
+                            ) : null}
+                          </div>
+                          {tagExcludeOptions.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">
+                              Nenhuma tag cadastrada.
+                            </p>
+                          ) : (
+                            <div className="flex flex-wrap gap-2">
+                              {tagExcludeOptions.map((tag) => (
+                                <button
+                                  key={`tag-exclude-${tag}`}
+                                  type="button"
+                                  className="focus:outline-none"
+                                  onClick={() => toggleArrayValue("audience_tags_exclude", tag)}
+                                >
+                                  <Badge
+                                    variant={
+                                      audienceTagsExclude.includes(tag) ? "destructive" : "secondary"
+                                    }
+                                  >
+                                    {tag}
+                                  </Badge>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid gap-4 lg:grid-cols-3">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-semibold">Cidades</p>
+                            {selectedCity ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setCitySelection("")}
+                              >
+                                Limpar
+                              </Button>
+                            ) : null}
+                          </div>
+                          <Input
+                            placeholder="Buscar cidade..."
+                            value={citySearch}
+                            onChange={(event) => setCitySearch(event.target.value)}
+                            className="h-9"
+                          />
+                          {selectedCity ? (
+                            <p className="text-xs text-muted-foreground">
+                              Cidade selecionada: <span className="font-medium">{selectedCity}</span>
+                            </p>
+                          ) : null}
+                          <ScrollArea className="h-40 rounded-lg border bg-muted/30 p-3">
+                            {filterOptions.cities.length === 0 ? (
+                              <p className="text-xs text-muted-foreground">
+                                {debouncedCitySearch
+                                  ? "Nenhuma cidade encontrada."
+                                  : "Nenhuma cidade cadastrada."}
+                              </p>
+                            ) : (
+                              <div className="space-y-2">
+                                <label className="flex items-center gap-2 text-sm">
+                                  <Checkbox
+                                    checked={!selectedCity}
+                                    onCheckedChange={() => setCitySelection("")}
+                                  />
+                                  <span>Todas as cidades</span>
+                                </label>
+                                {filterOptions.cities.map((city) => (
+                                  <label key={city} className="flex items-center gap-2 text-sm">
+                                    <Checkbox
+                                      checked={selectedCity === city}
+                                      onCheckedChange={() => setCitySelection(city)}
+                                    />
+                                    <span>{city}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            )}
+                          </ScrollArea>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-semibold">Bairros</p>
+                            {selectedBairro ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setBairroSelection("")}
+                              >
+                                Limpar
+                              </Button>
+                            ) : null}
+                          </div>
+                          <ScrollArea className="h-40 rounded-lg border bg-muted/30 p-3">
+                            {!selectedCity ? (
+                              <p className="text-xs text-muted-foreground">
+                                Selecione uma cidade para listar os bairros.
+                              </p>
+                            ) : filterOptions.bairros.length === 0 ? (
+                              <p className="text-xs text-muted-foreground">
+                                Nenhum bairro cadastrado para a cidade selecionada.
+                              </p>
+                            ) : (
+                              <div className="space-y-2">
+                                <label className="flex items-center gap-2 text-sm">
+                                  <Checkbox
+                                    checked={!selectedBairro}
+                                    onCheckedChange={() => setBairroSelection("")}
+                                  />
+                                  <span>Todos os bairros</span>
+                                </label>
+                                {filterOptions.bairros.map((bairro) => (
+                                  <label key={bairro} className="flex items-center gap-2 text-sm">
+                                    <Checkbox
+                                      checked={selectedBairro === bairro}
+                                      onCheckedChange={() => setBairroSelection(bairro)}
+                                    />
+                                    <span>{bairro}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            )}
+                          </ScrollArea>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-semibold">Ruas</p>
+                            {selectedRua ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setRuaSelection("")}
+                              >
+                                Limpar
+                              </Button>
+                            ) : null}
+                          </div>
+                          <ScrollArea className="h-40 rounded-lg border bg-muted/30 p-3">
+                            {!selectedCity ? (
+                              <p className="text-xs text-muted-foreground">
+                                Selecione uma cidade para listar as ruas.
+                              </p>
+                            ) : !selectedBairro ? (
+                              <p className="text-xs text-muted-foreground">
+                                Selecione um bairro para listar as ruas.
+                              </p>
+                            ) : filterOptions.ruas.length === 0 ? (
+                              <p className="text-xs text-muted-foreground">
+                                Nenhuma rua cadastrada para o bairro selecionado.
+                              </p>
+                            ) : (
+                              <div className="space-y-2">
+                                <label className="flex items-center gap-2 text-sm">
+                                  <Checkbox
+                                    checked={!selectedRua}
+                                    onCheckedChange={() => setRuaSelection("")}
+                                  />
+                                  <span>Todas as ruas</span>
+                                </label>
+                                {filterOptions.ruas.map((rua) => (
+                                  <label key={rua} className="flex items-center gap-2 text-sm">
+                                    <Checkbox
+                                      checked={selectedRua === rua}
+                                      onCheckedChange={() => setRuaSelection(rua)}
+                                    />
+                                    <span>{rua}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            )}
+                          </ScrollArea>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : null}
+
               {audienceMode === "file" ? (
                 <div className="space-y-3">
                   <div className="grid gap-4 md:grid-cols-3">
@@ -631,6 +1334,10 @@ export function CampaignForm({
 
                   {importError ? (
                     <p className="text-sm text-destructive">{importError}</p>
+                  ) : null}
+
+                  {audienceError ? (
+                    <p className="text-sm text-destructive">{audienceError}</p>
                   ) : null}
 
                   {importSummary ? (
@@ -698,7 +1405,7 @@ export function CampaignForm({
                             shouldDirty: true,
                             shouldValidate: true
                           })
-                          if (option.value !== "none") {
+                          if (option.value !== "none" && option.value !== "link") {
                             setTimeout(() => mediaInputRef.current?.click(), 0)
                           }
                         }}
@@ -710,75 +1417,102 @@ export function CampaignForm({
                   })}
                 </div>
 
-                <FormItem>
-                  <FormLabel>Arquivo da mídia (Supabase)</FormLabel>
-                  <FormControl>
-                    <Input
-                      ref={mediaInputRef}
-                      type="file"
-                      accept={acceptTypes}
-                      disabled={mediaType === "none" || isUploading}
-                      onChange={async (event) => {
-                        const file = event.target.files?.[0]
-                        if (!file) return
-                        setIsUploading(true)
-                        setUploadError(null)
-                        try {
-                          const result = await uploadMedia(file, "campaigns")
-                          form.setValue("media_url", result.url, {
-                            shouldDirty: true,
-                            shouldValidate: true
-                          })
-                        } catch (error) {
-                          const message =
-                            error instanceof Error ? error.message : "Erro ao enviar mídia"
-                          setUploadError(message)
-                        } finally {
-                          setIsUploading(false)
-                        }
-                      }}
-                    />
-                  </FormControl>
-                  {isUploading ? (
-                    <p className="text-xs text-muted-foreground">Enviando arquivo...</p>
-                  ) : null}
-                  {uploadError ? (
-                    <p className="text-xs text-destructive">{uploadError}</p>
-                  ) : null}
-                </FormItem>
-
-                <FormField
-                  control={form.control}
-                  name="media_url"
-                  render={({ field }) => (
+                {mediaType !== "none" && mediaType !== "link" ? (
+                  <>
                     <FormItem>
-                      <FormLabel>URL da mídia</FormLabel>
+                      <FormLabel>Arquivo da mídia (Supabase)</FormLabel>
                       <FormControl>
-                        <Input placeholder="URL gerada automaticamente" readOnly {...field} />
+                        <Input
+                          ref={mediaInputRef}
+                          type="file"
+                          accept={acceptTypes}
+                          disabled={isUploading}
+                          onChange={async (event) => {
+                            const file = event.target.files?.[0]
+                            if (!file) return
+                            if (mediaType === "video" && file.size > MAX_VIDEO_BYTES) {
+                              setUploadError(
+                                "Vídeo acima de 64 MB. Envie um arquivo menor."
+                              )
+                              event.target.value = ""
+                              return
+                            }
+                            setIsUploading(true)
+                            setUploadError(null)
+                            try {
+                              const result = await uploadMedia(file, "campaigns")
+                              form.setValue("media_url", result.url, {
+                                shouldDirty: true,
+                                shouldValidate: true
+                              })
+                            } catch (error) {
+                              const message =
+                                error instanceof Error
+                                  ? error.message
+                                  : "Erro ao enviar mídia"
+                              setUploadError(message)
+                            } finally {
+                              setIsUploading(false)
+                            }
+                          }}
+                        />
                       </FormControl>
-                      <FormMessage />
+                      {isUploading ? (
+                        <p className="text-xs text-muted-foreground">Enviando arquivo...</p>
+                      ) : null}
+                      {uploadError ? (
+                        <p className="text-xs text-destructive">{uploadError}</p>
+                      ) : null}
                     </FormItem>
-                  )}
-                />
+
+                    <FormField
+                      control={form.control}
+                      name="media_url"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>URL da mídia</FormLabel>
+                          <FormControl>
+                            <Input placeholder="URL gerada automaticamente" readOnly {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </>
+                ) : null}
               </div>
 
               <FormField
                 control={form.control}
                 name="message_body"
                 render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Mensagem principal</FormLabel>
-                    <FormControl>
-                      <WhatsAppMessageEditor
-                        value={field.value}
-                        onChange={field.onChange}
-                        placeholder="Digite a mensagem"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
+                  !isAudio ? (
+                    <FormItem>
+                      <FormLabel>
+                        {mediaType && mediaType !== "none" && mediaType !== "link"
+                          ? "Mensagem principal (opcional)"
+                          : "Mensagem principal"}
+                      </FormLabel>
+                      <FormControl>
+                        <WhatsAppMessageEditor
+                          value={field.value}
+                          onChange={field.onChange}
+                          placeholder="Digite a mensagem"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  ) : (
+                    <FormItem>
+                      <FormLabel>Mensagem principal</FormLabel>
+                      <div className="rounded-lg border border-dashed bg-muted/30 p-3 text-xs text-muted-foreground">
+                        Áudio não usa texto. O envio será apenas com o arquivo de áudio.
+                      </div>
+                    </FormItem>
+                  )
                 )}
               />
+
             </div>
           </Card>
 
@@ -868,6 +1602,35 @@ export function CampaignForm({
                   )}
                 />
               </div>
+
+              {watchValues.use_composing ? (
+                <FormField
+                  control={form.control}
+                  name="typing_delay_seconds"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tempo de digitando (segundos)</FormLabel>
+                      <FormControl>
+                        <div className="flex items-center gap-3">
+                          <Input
+                            type="range"
+                            min={1}
+                            max={15}
+                            step={1}
+                            value={field.value ?? 6}
+                            onChange={(event) => field.onChange(Number(event.target.value))}
+                            className="h-2"
+                          />
+                          <span className="text-sm font-medium">{field.value ?? 6}s</span>
+                        </div>
+                      </FormControl>
+                      <p className="text-xs text-muted-foreground">
+                        Controla o tempo exibindo "digitando" antes do envio.
+                      </p>
+                    </FormItem>
+                  )}
+                />
+              ) : null}
             </div>
           </Card>
 
@@ -886,13 +1649,27 @@ export function CampaignForm({
                   render={({ field }) => (
                     <FormItem className="flex items-center gap-2">
                       <FormControl>
-                        <Switch checked={field.value} onCheckedChange={field.onChange} />
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                          disabled={isAudio}
+                        />
                       </FormControl>
                       <FormLabel>Ativar</FormLabel>
                     </FormItem>
                   )}
                 />
               </div>
+              {isAudio ? (
+                <p className="text-xs text-muted-foreground">
+                  Randomizador indisponível para áudio.
+                </p>
+              ) : null}
+              {form.formState.errors.variants?.message ? (
+                <p className="text-xs text-destructive">
+                  {String(form.formState.errors.variants.message)}
+                </p>
+              ) : null}
 
               {watchRandomizer ? (
                 <div className="space-y-4">
@@ -963,7 +1740,19 @@ export function CampaignForm({
                                 <FormItem>
                                   <FormLabel>Peso</FormLabel>
                                   <FormControl>
-                                    <Input type="number" {...field} />
+                                    <Input
+                                      type="number"
+                                      value={field.value ?? ""}
+                                      onChange={(event) => {
+                                        const value = event.target.value
+                                        if (value === "") {
+                                          field.onChange(undefined)
+                                          return
+                                        }
+                                        const numeric = Number(value)
+                                        field.onChange(Number.isNaN(numeric) ? value : numeric)
+                                      }}
+                                    />
                                   </FormControl>
                                 </FormItem>
                               )}
@@ -1049,6 +1838,8 @@ export function CampaignForm({
             message={messageBody}
             mediaType={mediaType}
             mediaUrl={mediaUrl}
+            linkPreview={linkPreview || mediaType === "link"}
+            linkPreviewData={linkPreviewData ?? undefined}
             useRandomizer={watchRandomizer}
             variants={watchValues.variants}
           />
@@ -1059,7 +1850,7 @@ export function CampaignForm({
               <p className="text-sm text-muted-foreground">
                 Salve sua campanha ou volte depois.
               </p>
-              {mode === "create" ? (
+              {mode === "create" || canPublishFromDraft ? (
                 <Button
                   type="button"
                   variant="outline"
@@ -1085,13 +1876,17 @@ export function CampaignForm({
                 className="w-full"
                 disabled={busy}
                 onClick={() => {
-                  submitActionRef.current = "publish"
+                  submitActionRef.current = mode === "edit" && !canPublishFromDraft ? "keep" : "publish"
                 }}
               >
                 {busy
                   ? "Salvando..."
                   : mode === "edit"
-                    ? "Salvar alterações"
+                    ? canPublishFromDraft
+                      ? scheduleEnabled
+                        ? "Agendar campanha"
+                        : "Publicar campanha"
+                      : "Salvar alterações"
                     : scheduleEnabled
                       ? "Agendar campanha"
                       : "Publicar campanha"}

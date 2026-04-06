@@ -1,5 +1,5 @@
 -- Server-only helper functions to access private schema safely via service_role.
--- Apply with: supabase db query --linked -f supabase/sql/private-access.sql
+-- Apply with: npx supabase db query --linked -f supabase/sql/private-access.sql
 
 alter table private.whatsapp_instances
   add column if not exists usuario uuid,
@@ -10,9 +10,18 @@ alter table private.whatsapp_instances
   add column if not exists acessores text[],
   add column if not exists prazo_solicitacoes text,
   add column if not exists conexao_w text,
+  add column if not exists cep text,
+  add column if not exists rua text,
+  add column if not exists bairro text,
+  add column if not exists numero_residencia text,
+  add column if not exists complemento text,
   add column if not exists campanha_pause boolean not null default false,
-  add column if not exists campanha_horario_pause time not null default '20:00:00'::time,
-  add column if not exists campanha_horario_reinicio time not null default '07:00:00'::time;
+  add column if not exists campanha_horario_pause time default '20:00:00'::time,
+  add column if not exists campanha_horario_reinicio time default '07:00:00'::time;
+
+alter table private.whatsapp_instances
+  alter column campanha_horario_pause drop not null,
+  alter column campanha_horario_reinicio drop not null;
 
 drop function if exists public.list_whatsapp_instances();
 
@@ -20,12 +29,14 @@ create or replace function public.list_whatsapp_instances()
 returns table (
   id uuid,
   name text,
-  provider text,
-  base_url text,
   instance_name text,
   owner_number text,
   descricao text,
-  telefone text,
+  cep text,
+  rua text,
+  bairro text,
+  numero_residencia text,
+  complemento text,
   cidade text,
   estado text,
   acessores text[],
@@ -35,8 +46,6 @@ returns table (
   campanha_horario_pause time,
   campanha_horario_reinicio time,
   is_active boolean,
-  send_readchat boolean,
-  send_composing boolean,
   throttle_per_minute integer,
   created_at timestamptz,
   updated_at timestamptz
@@ -47,12 +56,14 @@ set search_path = private, public
 as $$
   select id,
          name,
-         provider,
-         base_url,
          instance_name,
          owner_number,
          descricao,
-         telefone,
+         cep,
+         rua,
+         bairro,
+         numero_residencia,
+         complemento,
          cidade,
          estado,
          acessores,
@@ -62,14 +73,41 @@ as $$
          campanha_horario_pause,
          campanha_horario_reinicio,
          is_active,
-         send_readchat,
-         send_composing,
          throttle_per_minute,
          created_at,
          updated_at
   from private.whatsapp_instances
   order by created_at desc;
 $$;
+
+-- Old signatures (drop to avoid conflicts)
+drop function if exists public.save_whatsapp_instance(
+  uuid,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text[],
+  text,
+  text,
+  boolean,
+  time,
+  time,
+  text,
+  boolean,
+  boolean,
+  boolean,
+  integer
+);
 
 drop function if exists public.save_whatsapp_instance(
   uuid,
@@ -78,6 +116,21 @@ drop function if exists public.save_whatsapp_instance(
   text,
   text,
   text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text[],
+  text,
+  text,
+  boolean,
+  time,
+  time,
   text,
   boolean,
   boolean,
@@ -88,11 +141,15 @@ drop function if exists public.save_whatsapp_instance(
 create or replace function public.save_whatsapp_instance(
   p_id uuid,
   p_name text,
-  p_provider text,
   p_base_url text,
   p_instance_name text,
   p_owner_number text,
   p_descricao text,
+  p_cep text,
+  p_rua text,
+  p_bairro text,
+  p_numero_residencia text,
+  p_complemento text,
   p_telefone text,
   p_cidade text,
   p_estado text,
@@ -119,11 +176,15 @@ begin
   if p_id is null then
     insert into private.whatsapp_instances(
       name,
-      provider,
       base_url,
       instance_name,
       owner_number,
       descricao,
+      cep,
+      rua,
+      bairro,
+      numero_residencia,
+      complemento,
       telefone,
       cidade,
       estado,
@@ -140,11 +201,15 @@ begin
       throttle_per_minute
     ) values (
       p_name,
-      p_provider,
-      p_base_url,
+      coalesce(p_base_url, 'https://gabitech.uazapi.com'),
       p_instance_name,
       p_owner_number,
       p_descricao,
+      p_cep,
+      p_rua,
+      p_bairro,
+      p_numero_residencia,
+      p_complemento,
       p_telefone,
       p_cidade,
       p_estado,
@@ -152,8 +217,16 @@ begin
       p_prazo_solicitacoes,
       p_conexao_w,
       coalesce(p_campanha_pause, false),
-      coalesce(p_campanha_horario_pause, '20:00:00'::time),
-      coalesce(p_campanha_horario_reinicio, '07:00:00'::time),
+      case
+        when coalesce(p_campanha_pause, false)
+          then coalesce(p_campanha_horario_pause, '20:00:00'::time)
+        else null
+      end,
+      case
+        when coalesce(p_campanha_pause, false)
+          then coalesce(p_campanha_horario_reinicio, '07:00:00'::time)
+        else null
+      end,
       p_token,
       coalesce(p_is_active, true),
       coalesce(p_send_readchat, false),
@@ -164,11 +237,15 @@ begin
   else
     update private.whatsapp_instances
     set name = p_name,
-        provider = p_provider,
-        base_url = p_base_url,
+        base_url = coalesce(nullif(p_base_url, ''), base_url),
         instance_name = p_instance_name,
         owner_number = p_owner_number,
         descricao = p_descricao,
+        cep = coalesce(p_cep, cep),
+        rua = coalesce(p_rua, rua),
+        bairro = coalesce(p_bairro, bairro),
+        numero_residencia = coalesce(p_numero_residencia, numero_residencia),
+        complemento = coalesce(p_complemento, complemento),
         telefone = p_telefone,
         cidade = p_cidade,
         estado = p_estado,
@@ -176,8 +253,16 @@ begin
         prazo_solicitacoes = p_prazo_solicitacoes,
         conexao_w = p_conexao_w,
         campanha_pause = coalesce(p_campanha_pause, campanha_pause),
-        campanha_horario_pause = coalesce(p_campanha_horario_pause, campanha_horario_pause),
-        campanha_horario_reinicio = coalesce(p_campanha_horario_reinicio, campanha_horario_reinicio),
+        campanha_horario_pause = case
+          when coalesce(p_campanha_pause, campanha_pause)
+            then coalesce(p_campanha_horario_pause, campanha_horario_pause, '20:00:00'::time)
+          else null
+        end,
+        campanha_horario_reinicio = case
+          when coalesce(p_campanha_pause, campanha_pause)
+            then coalesce(p_campanha_horario_reinicio, campanha_horario_reinicio, '07:00:00'::time)
+          else null
+        end,
         token = case when p_token is null or p_token = '' then token else p_token end,
         is_active = coalesce(p_is_active, is_active),
         send_readchat = coalesce(p_send_readchat, send_readchat),
@@ -191,18 +276,21 @@ begin
 end;
 $$;
 
+drop function if exists public.get_whatsapp_instance_secret(uuid);
+
 create or replace function public.get_whatsapp_instance_secret(p_id uuid)
 returns table (
   id uuid,
   base_url text,
   token text,
-  instance_name text
+  instance_name text,
+  owner_number text
 )
 language sql
 security definer
 set search_path = private, public
 as $$
-  select id, base_url, token, instance_name
+  select id, base_url, token, instance_name, owner_number
   from private.whatsapp_instances
   where id = p_id;
 $$;
@@ -268,6 +356,10 @@ revoke all on function public.save_whatsapp_instance(
   text,
   text,
   text,
+  text,
+  text,
+  text,
+  text,
   text[],
   text,
   text,
@@ -296,6 +388,10 @@ grant execute on function public.save_whatsapp_instance(
   text,
   text,
   text,
+  text,
+  text,
+  text,
+  text,
   text[],
   text,
   text,
@@ -311,3 +407,4 @@ grant execute on function public.save_whatsapp_instance(
 grant execute on function public.get_whatsapp_instance_secret(uuid) to service_role;
 grant execute on function public.update_whatsapp_instance_connection(uuid, text) to service_role;
 grant execute on function public.list_webhook_events(bigint, integer, integer) to service_role;
+

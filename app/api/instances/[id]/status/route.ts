@@ -21,7 +21,7 @@ async function getInstanceSecret(id: string) {
   }
 }
 
-export async function POST(
+export async function GET(
   _request: Request,
   { params }: { params: { id: string } }
 ) {
@@ -36,40 +36,46 @@ export async function POST(
     }
 
     const baseUrl = instance.base_url.replace(/\/$/, "")
-    const url = `${baseUrl}/instance/disconnect`
-    const phone = instance.owner_number ? instance.owner_number.replace(/\D/g, "") : ""
-    const body: Record<string, string> = {}
+    const statusUrl = new URL(`${baseUrl}/instance/status`)
     if (instance.instance_name) {
-      body.instanceName = instance.instance_name
-      body.instance_name = instance.instance_name
+      statusUrl.searchParams.set("instanceName", instance.instance_name)
+      statusUrl.searchParams.set("instance_name", instance.instance_name)
     }
-    if (phone) {
-      body.phone = phone
+    if (instance.owner_number) {
+      const phone = instance.owner_number.replace(/\D/g, "")
+      if (phone) {
+        statusUrl.searchParams.set("phone", phone)
+        statusUrl.searchParams.set("number", phone)
+      }
     }
 
-    const response = await fetch(url, {
-      method: "POST",
+    const response = await fetch(statusUrl.toString(), {
+      method: "GET",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${instance.token}`,
         token: instance.token,
         apikey: instance.token,
         "x-api-key": instance.token
-      },
-      body: JSON.stringify(body)
+      }
     })
 
     const text = await response.text()
     const payload = text ? safeJson(text) : {}
 
     if (response.ok) {
-      await updateConnectionStatus(params.id, payload, "Desconectado")
-      return NextResponse.json(payload, { status: 200 })
+      let status = deriveConnectionLabel(payload, "Conectando")
+      const currentStatus = await getCurrentConnectionStatus(params.id)
+      if (currentStatus === "Conectado" && status === "Conectando") {
+        status = "Conectado"
+      }
+      await updateConnectionStatus(params.id, status)
+      return NextResponse.json({ ...payload, derivedStatus: status }, { status: 200 })
     }
 
     return NextResponse.json(payload, { status: 500 })
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Erro ao desconectar instancia"
+    const message = error instanceof Error ? error.message : "Erro ao consultar status"
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }
@@ -82,9 +88,8 @@ function safeJson(text: string) {
   }
 }
 
-async function updateConnectionStatus(id: string, payload: Record<string, unknown>, fallback: string) {
+async function updateConnectionStatus(id: string, status: string) {
   const supabase = createAdminClient()
-  const status = deriveConnectionLabel(payload, fallback)
   const { error } = await supabase.rpc("update_whatsapp_instance_connection", {
     p_id: id,
     p_conexao_w: status
@@ -95,3 +100,18 @@ async function updateConnectionStatus(id: string, payload: Record<string, unknow
   }
 }
 
+async function getCurrentConnectionStatus(id: string) {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .schema("private")
+    .from("whatsapp_instances")
+    .select("conexao_w")
+    .eq("id", id)
+    .maybeSingle()
+
+  if (error) {
+    return null
+  }
+
+  return data?.conexao_w ?? null
+}

@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 
 export default function Topbar() {
   return (
-    <header className="flex flex-wrap items-center justify-between gap-4 border-b bg-card/70 px-6 py-4 backdrop-blur">
+    <header className="flex flex-wrap items-center justify-between gap-4 border-b bg-card/70 px-4 py-4 backdrop-blur sm:px-6">
       <div>
         <p className="font-display text-xl font-semibold">Centro de Operações</p>
         <p className="text-sm text-muted-foreground">

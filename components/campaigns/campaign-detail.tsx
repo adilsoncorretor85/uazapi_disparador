@@ -77,6 +77,14 @@ export default function CampaignDetail() {
     return <p>Carregando detalhes...</p>
   }
 
+  const displayStatus = campaign.derived_status ?? campaign.status
+  const canEdit =
+    displayStatus === "draft" ||
+    displayStatus === "scheduled" ||
+    displayStatus === "paused"
+  const canPause = displayStatus === "processing"
+  const canResume = displayStatus === "paused"
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -84,9 +92,11 @@ export default function CampaignDetail() {
         description={campaign.description ?? "Sem descrição"}
         actions={
           <>
-            <Button asChild variant="secondary">
-              <Link href={`/campaigns/${campaign.id}/edit`}>Editar</Link>
-            </Button>
+            {canEdit ? (
+              <Button asChild variant="secondary">
+                <Link href={`/campaigns/${campaign.id}/edit`}>Editar</Link>
+              </Button>
+            ) : null}
             <Button
               variant="outline"
               onClick={() => actionMutation.mutate({ action: "duplicate" })}
@@ -94,20 +104,24 @@ export default function CampaignDetail() {
               <Copy className="mr-2 h-4 w-4" />
               Duplicar
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => actionMutation.mutate({ action: "pause" })}
-            >
-              <PauseCircle className="mr-2 h-4 w-4" />
-              Pausar
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => actionMutation.mutate({ action: "resume" })}
-            >
-              <PlayCircle className="mr-2 h-4 w-4" />
-              Continuar
-            </Button>
+            {canPause ? (
+              <Button
+                variant="outline"
+                onClick={() => actionMutation.mutate({ action: "pause" })}
+              >
+                <PauseCircle className="mr-2 h-4 w-4" />
+                Pausar
+              </Button>
+            ) : null}
+            {canResume ? (
+              <Button
+                variant="outline"
+                onClick={() => actionMutation.mutate({ action: "resume" })}
+              >
+                <PlayCircle className="mr-2 h-4 w-4" />
+                Continuar
+              </Button>
+            ) : null}
             <Button
               variant="destructive"
               onClick={() => actionMutation.mutate({ action: "cancel" })}
@@ -127,7 +141,10 @@ export default function CampaignDetail() {
       />
 
       <div className="flex flex-wrap items-center gap-3">
-        <StatusBadge status={campaign.status} label={CAMPAIGN_STATUS_LABELS[campaign.status]} />
+        <StatusBadge
+          status={displayStatus}
+          label={CAMPAIGN_STATUS_LABELS[displayStatus]}
+        />
         <span className="text-sm text-muted-foreground">Instância {campaign.instance_id}</span>
         <span className="text-sm text-muted-foreground">Agendada: {formatDateTime(campaign.scheduled_at)}</span>
       </div>
@@ -204,7 +221,9 @@ export default function CampaignDetail() {
             <Card>
               <div className="space-y-2">
                 <p className="text-xs uppercase text-muted-foreground">Mídia</p>
-                <p className="text-sm">{campaign.media_type ?? "Texto"}</p>
+                <p className="text-sm">
+                  {campaign.link_preview ? "Link (prévia)" : campaign.media_type ?? "Texto"}
+                </p>
                 <p className="text-xs text-muted-foreground">{campaign.media_url ?? "Sem mídia"}</p>
               </div>
             </Card>
@@ -214,6 +233,9 @@ export default function CampaignDetail() {
                 <p className="text-sm">{campaign.instance_id}</p>
                 <p className="text-xs text-muted-foreground">
                   Readchat: {campaign.readchat ? "Sim" : "Não"} • Composing: {campaign.use_composing ? "Sim" : "Não"}
+                  {campaign.use_composing
+                    ? ` • Digitando: ${campaign.typing_delay_seconds ?? 0}s`
+                    : ""}
                 </p>
               </div>
             </Card>

@@ -20,8 +20,8 @@ export async function updateInstance(id: string, values: InstanceFormValues) {
   })
 }
 
-export async function connectInstance(id: string) {
-  return apiFetch<Record<string, unknown>>(`/api/instances/${id}/connect`, {
+export async function connectInstance(id: string, mode: "qr" | "code" = "qr") {
+  return apiFetch<Record<string, unknown>>(`/api/instances/${id}/connect?mode=${mode}`, {
     method: "POST"
   })
 }
@@ -29,6 +29,12 @@ export async function connectInstance(id: string) {
 export async function disconnectInstance(id: string) {
   return apiFetch<Record<string, unknown>>(`/api/instances/${id}/disconnect`, {
     method: "POST"
+  })
+}
+
+export async function fetchInstanceStatus(id: string) {
+  return apiFetch<Record<string, unknown>>(`/api/instances/${id}/status`, {
+    method: "GET"
   })
 }
 

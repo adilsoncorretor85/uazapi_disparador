@@ -10,3 +10,6 @@ yarn-error.log*
 pnpm-debug.log*
 .DS_Store
 
+
+dev.out.log
+dev.err.log
