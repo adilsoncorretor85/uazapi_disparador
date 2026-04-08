@@ -213,9 +213,6 @@ export default function CampaignDetail() {
                 <p className="text-xs text-muted-foreground">
                   Delay {campaign.delay_min_seconds ?? 0}s - {campaign.delay_max_seconds ?? 0}s
                 </p>
-                <p className="text-xs text-muted-foreground">
-                  Batch {campaign.batch_size ?? 0} • Máx tentativas {campaign.max_attempts ?? 0}
-                </p>
               </div>
             </Card>
             <Card>

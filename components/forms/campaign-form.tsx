@@ -78,8 +78,8 @@ const defaultValues: CampaignFormValues = {
   message_body: "",
   link_preview: false,
   typing_delay_seconds: 6,
-  delay_min_seconds: 5,
-  delay_max_seconds: 20,
+  delay_min_seconds: 60,
+  delay_max_seconds: 180,
   batch_size: 50,
   max_attempts: 3,
   readchat: false,
@@ -764,8 +764,6 @@ export function CampaignForm({
     instance: instances?.find((inst) => inst.id === watchValues.instance_id)?.name ?? "-",
     scheduled: scheduledIso ? formatDateTimeInTimeZone(scheduledIso) : "Sem agendamento",
     delay: `${watchValues.delay_min_seconds ?? 0}s - ${watchValues.delay_max_seconds ?? 0}s`,
-    batch: watchValues.batch_size ?? 0,
-    maxAttempts: watchValues.max_attempts ?? 0,
     useRandomizer: watchValues.use_randomizer
   }
 
@@ -1550,30 +1548,6 @@ export function CampaignForm({
                     </FormItem>
                   )}
                 />
-                <FormField
-                  control={form.control}
-                  name="batch_size"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Batch size</FormLabel>
-                      <FormControl>
-                        <Input type="number" {...field} />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="max_attempts"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Máx. tentativas</FormLabel>
-                      <FormControl>
-                        <Input type="number" {...field} />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
               </div>
 
               <div className="flex flex-wrap items-center gap-6">
@@ -1602,6 +1576,21 @@ export function CampaignForm({
                   )}
                 />
               </div>
+
+              <FormField
+                control={form.control}
+                name="batch_size"
+                render={({ field }) => (
+                  <input type="hidden" {...field} />
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="max_attempts"
+                render={({ field }) => (
+                  <input type="hidden" {...field} />
+                )}
+              />
 
               {watchValues.use_composing ? (
                 <FormField
@@ -1817,9 +1806,6 @@ export function CampaignForm({
                 <div className="rounded-lg border bg-muted/30 p-3">
                   <p className="text-xs text-muted-foreground">Envio</p>
                   <p className="font-medium">Delay {summary.delay}</p>
-                  <p className="text-xs text-muted-foreground">
-                    Batch {formatNumber(summary.batch)} | Máx. tentativas {formatNumber(summary.maxAttempts)}
-                  </p>
                 </div>
                 <div className="rounded-lg border bg-muted/30 p-3">
                   <p className="text-xs text-muted-foreground">Randomizador</p>
