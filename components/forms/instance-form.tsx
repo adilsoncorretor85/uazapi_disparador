@@ -150,7 +150,7 @@ export function InstanceForm({ defaultValues, onSubmit, submitLabel }: InstanceF
               <FormItem>
                 <FormLabel>Nome</FormLabel>
                 <FormControl>
-                  <Input {...field} />
+                  <Input {...field} value={field.value ?? ""} />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -166,7 +166,7 @@ export function InstanceForm({ defaultValues, onSubmit, submitLabel }: InstanceF
               <FormItem>
                 <FormLabel>Nome da instancia</FormLabel>
                 <FormControl>
-                  <Input {...field} />
+                  <Input {...field} value={field.value ?? ""} />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -179,7 +179,7 @@ export function InstanceForm({ defaultValues, onSubmit, submitLabel }: InstanceF
               <FormItem>
                 <FormLabel>Numero do dono</FormLabel>
                 <FormControl>
-                  <Input {...field} />
+                  <Input {...field} value={field.value ?? ""} />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -194,7 +194,7 @@ export function InstanceForm({ defaultValues, onSubmit, submitLabel }: InstanceF
             <FormItem>
               <FormLabel>Descricao</FormLabel>
               <FormControl>
-                <Input {...field} />
+                <Input {...field} value={field.value ?? ""} />
               </FormControl>
             </FormItem>
           )}
@@ -210,6 +210,7 @@ export function InstanceForm({ defaultValues, onSubmit, submitLabel }: InstanceF
                 <FormControl>
                   <Input
                     {...field}
+                    value={field.value ?? ""}
                     inputMode="numeric"
                     placeholder="Somente numeros"
                     onBlur={(event) => {
@@ -237,7 +238,7 @@ export function InstanceForm({ defaultValues, onSubmit, submitLabel }: InstanceF
               <FormItem>
                 <FormLabel>Rua</FormLabel>
                 <FormControl>
-                  <Input {...field} />
+                  <Input {...field} value={field.value ?? ""} />
                 </FormControl>
               </FormItem>
             )}
@@ -252,7 +253,7 @@ export function InstanceForm({ defaultValues, onSubmit, submitLabel }: InstanceF
               <FormItem>
                 <FormLabel>Bairro</FormLabel>
                 <FormControl>
-                  <Input {...field} />
+                  <Input {...field} value={field.value ?? ""} />
                 </FormControl>
               </FormItem>
             )}
@@ -264,7 +265,7 @@ export function InstanceForm({ defaultValues, onSubmit, submitLabel }: InstanceF
               <FormItem>
                 <FormLabel>Cidade</FormLabel>
                 <FormControl>
-                  <Input {...field} />
+                  <Input {...field} value={field.value ?? ""} />
                 </FormControl>
               </FormItem>
             )}
@@ -279,7 +280,7 @@ export function InstanceForm({ defaultValues, onSubmit, submitLabel }: InstanceF
               <FormItem>
                 <FormLabel>Estado</FormLabel>
                 <FormControl>
-                  <Input {...field} />
+                  <Input {...field} value={field.value ?? ""} />
                 </FormControl>
               </FormItem>
             )}
@@ -291,7 +292,7 @@ export function InstanceForm({ defaultValues, onSubmit, submitLabel }: InstanceF
               <FormItem>
                 <FormLabel>Numero</FormLabel>
                 <FormControl>
-                  <Input {...field} />
+                  <Input {...field} value={field.value ?? ""} />
                 </FormControl>
               </FormItem>
             )}
@@ -305,7 +306,7 @@ export function InstanceForm({ defaultValues, onSubmit, submitLabel }: InstanceF
             <FormItem>
               <FormLabel>Complemento</FormLabel>
               <FormControl>
-                <Input {...field} />
+                <Input {...field} value={field.value ?? ""} />
               </FormControl>
             </FormItem>
           )}
@@ -397,6 +398,7 @@ export function InstanceForm({ defaultValues, onSubmit, submitLabel }: InstanceF
                   <Input
                     type="number"
                     {...field}
+                    value={field.value ?? ""}
                     disabled={!throttleEnabled}
                     placeholder={throttleEnabled ? "Ex: 60" : "Desativado"}
                   />

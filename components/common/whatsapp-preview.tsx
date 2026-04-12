@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+﻿import type { ReactNode } from "react"
 
 import { Card } from "@/components/ui/card"
 
@@ -31,8 +31,9 @@ function getGreeting() {
   return "Boa noite"
 }
 
-function applyVariables(text: string) {
-  return text
+function applyVariables(text?: string | null) {
+  const safe = text ?? ""
+  return safe
     .replace(/{{\s*saudacao\s*}}/gi, getGreeting())
     .replace(/{{\s*primeiro_nome\s*}}/gi, SAMPLE_CONTACT.first_name)
     .replace(/{{\s*nome_completo\s*}}/gi, SAMPLE_CONTACT.full_name)
@@ -96,7 +97,7 @@ function parseInline(text: string, keyPrefix: string) {
   return nodes
 }
 
-function renderWhatsAppText(text: string) {
+function renderWhatsAppText(text?: string | null) {
   const withVars = applyVariables(text)
   const lines = withVars.split("\n")
   const nodes: ReactNode[] = []
@@ -195,7 +196,7 @@ export function WhatsAppPreview({
                     <img src={previewImage} alt="Preview" className="h-28 w-full object-cover" />
                   ) : (
                     <div className="flex h-20 items-center justify-center bg-black/5 text-[11px] text-muted-foreground">
-                      Previa do link
+                      Prévia do link
                     </div>
                   )}
                   <div className="space-y-1 px-2 py-1">
@@ -231,7 +232,7 @@ export function WhatsAppPreview({
                     Variante {index + 1}
                   </p>
                   <div className="whitespace-pre-wrap leading-relaxed text-[#222]">
-                    {renderWhatsAppText(variant.message_body)}
+                    {renderWhatsAppText(variant.message_body ?? "")}
                   </div>
                 </div>
               ))}
@@ -247,3 +248,5 @@ export function WhatsAppPreview({
     </Card>
   )
 }
+
+

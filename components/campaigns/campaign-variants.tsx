@@ -2,7 +2,6 @@
 
 import { useQuery } from "@tanstack/react-query"
 import { fetchCampaignVariants } from "@/lib/services/campaigns"
-import type { CampaignMessageVariant } from "@/types/entities"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 
@@ -16,7 +15,7 @@ export default function CampaignVariants({ campaignId }: CampaignVariantsProps) 
     queryFn: () => fetchCampaignVariants(campaignId)
   })
 
-  const variants = (data as CampaignMessageVariant[]) ?? []
+  const variants = data?.data ?? []
 
   return (
     <div className="space-y-4">

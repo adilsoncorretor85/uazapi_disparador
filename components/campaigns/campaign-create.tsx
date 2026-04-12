@@ -15,7 +15,7 @@ export default function CampaignCreate() {
     mutationFn: (values: CampaignFormValues) => createCampaign(values),
     onSuccess: (data) => {
       setError(null)
-      router.push(`/campaigns/${data.id}`)
+      router.push(`/campaigns/${data.data.id}`)
     },
     onError: (err: Error) => {
       setError(err.message)

@@ -27,7 +27,7 @@ export default function ContactsTable() {
   const [instanceId, setInstanceId] = useState("")
   const [selected, setSelected] = useState<Contact | null>(null)
 
-  const { data: instances } = useQuery({
+  const { data: instancesResponse } = useQuery({
     queryKey: ["instances"],
     queryFn: () => fetchInstances()
   })
@@ -45,7 +45,8 @@ export default function ContactsTable() {
       })
   })
 
-  const contacts = data ?? []
+  const contacts = data?.data ?? []
+  const instances = instancesResponse?.data ?? []
 
   return (
     <div className="space-y-4">
@@ -56,7 +57,7 @@ export default function ContactsTable() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todas</SelectItem>
-            {instances?.map((instance) => (
+            {instances.map((instance) => (
               <SelectItem key={instance.id} value={instance.id}>
                 {instance.name}
               </SelectItem>

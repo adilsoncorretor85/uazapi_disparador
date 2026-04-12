@@ -64,10 +64,20 @@ export async function POST(
 
     if (response.ok) {
       await updateConnectionStatus(params.id, payload, "Desconectado")
-      return NextResponse.json(payload, { status: 200 })
+      return NextResponse.json({ data: payload }, { status: 200 })
     }
 
-    return NextResponse.json(payload, { status: 500 })
+    return NextResponse.json(
+      {
+        error:
+          typeof payload?.error === "string"
+            ? payload.error
+            : typeof payload?.message === "string"
+              ? payload.message
+              : "Erro ao desconectar instancia"
+      },
+      { status: 500 }
+    )
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro ao desconectar instancia"
     return NextResponse.json({ error: message }, { status: 500 })

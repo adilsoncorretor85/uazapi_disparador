@@ -1,12 +1,12 @@
 ﻿"use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Calendar, Search } from "lucide-react"
 
 import { fetchCampaignMessages } from "@/lib/services/campaigns"
 import { formatDateTime } from "@/lib/format"
-import { MESSAGE_STATUS_LABELS } from "@/lib/constants/status"
+import { MESSAGE_STATUS_LABELS, MESSAGE_STATUSES } from "@/lib/constants/status"
 import type { CampaignMessageWithContact } from "@/types/entities"
 import { Input } from "@/components/ui/input"
 import {
@@ -37,6 +37,10 @@ export default function CampaignMessagesTable({ campaignId }: CampaignMessagesTa
   const [to, setTo] = useState("")
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<CampaignMessageWithContact | null>(null)
+
+  useEffect(() => {
+    setPage(1)
+  }, [status, delivered, read, failed, processed, from, to])
 
   const queryKey = useMemo(
     () => [
@@ -72,8 +76,8 @@ export default function CampaignMessagesTable({ campaignId }: CampaignMessagesTa
       })
   })
 
-  const messages = (data as { data: CampaignMessageWithContact[]; count: number })?.data ?? []
-  const total = (data as { data: CampaignMessageWithContact[]; count: number })?.count ?? 0
+  const messages = data?.data ?? []
+  const total = data?.meta?.count ?? 0
   const totalPages = Math.max(1, Math.ceil(total / 20))
 
   return (
@@ -98,9 +102,9 @@ export default function CampaignMessagesTable({ campaignId }: CampaignMessagesTa
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>
-            {Object.entries(MESSAGE_STATUS_LABELS).map(([value, label]) => (
+            {MESSAGE_STATUSES.map((value) => (
               <SelectItem key={value} value={value}>
-                {label}
+                {MESSAGE_STATUS_LABELS[value]}
               </SelectItem>
             ))}
           </SelectContent>
@@ -174,10 +178,12 @@ export default function CampaignMessagesTable({ campaignId }: CampaignMessagesTa
             <TableHead>Mídia</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Provider ID</TableHead>
+            <TableHead>Provider Status</TableHead>
             <TableHead>Tentativas</TableHead>
             <TableHead>Entregue</TableHead>
             <TableHead>Lido</TableHead>
             <TableHead>Processado</TableHead>
+            <TableHead>Processado em</TableHead>
             <TableHead>Enviado</TableHead>
             <TableHead>Falha</TableHead>
             <TableHead>Ações</TableHead>
@@ -186,11 +192,11 @@ export default function CampaignMessagesTable({ campaignId }: CampaignMessagesTa
         <TableBody>
           {isLoading ? (
             <TableRow>
-              <TableCell colSpan={15}>Carregando envios...</TableCell>
+              <TableCell colSpan={17}>Carregando envios...</TableCell>
             </TableRow>
           ) : messages.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={15}>Nenhum envio encontrado.</TableCell>
+              <TableCell colSpan={17}>Nenhum envio encontrado.</TableCell>
             </TableRow>
           ) : (
             messages.map((message) => (
@@ -214,10 +220,12 @@ export default function CampaignMessagesTable({ campaignId }: CampaignMessagesTa
                   <StatusBadge status={message.status} label={MESSAGE_STATUS_LABELS[message.status]} />
                 </TableCell>
                 <TableCell>{message.provider_message_id ?? "-"}</TableCell>
+                <TableCell>{message.provider_status ?? "-"}</TableCell>
                 <TableCell>{message.attempt_count ?? 0}</TableCell>
                 <TableCell>{message.is_delivered ? "Sim" : "Não"}</TableCell>
                 <TableCell>{message.is_read ? "Sim" : "Não"}</TableCell>
                 <TableCell>{message.processed ? "Sim" : "Não"}</TableCell>
+                <TableCell>{message.processed_at ? formatDateTime(message.processed_at) : "-"}</TableCell>
                 <TableCell>{formatDateTime(message.sent_at)}</TableCell>
                 <TableCell>{message.failed_at ? formatDateTime(message.failed_at) : "-"}</TableCell>
                 <TableCell>
@@ -268,6 +276,14 @@ export default function CampaignMessagesTable({ campaignId }: CampaignMessagesTa
                     <p className="text-sm">
                       {selected.contact?.full_name ?? selected.contact?.first_name ?? selected.contact_id ?? "-"}
                     </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Status local</p>
+                    <p className="text-sm">{MESSAGE_STATUS_LABELS[selected.status] ?? selected.status}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Provider ID</p>
+                    <p className="text-sm">{selected.provider_message_id ?? "-"}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Status provider</p>

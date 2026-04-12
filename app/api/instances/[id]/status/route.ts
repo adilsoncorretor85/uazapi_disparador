@@ -70,10 +70,20 @@ export async function GET(
         status = "Conectado"
       }
       await updateConnectionStatus(params.id, status)
-      return NextResponse.json({ ...payload, derivedStatus: status }, { status: 200 })
+      return NextResponse.json({ data: { ...payload, derivedStatus: status } }, { status: 200 })
     }
 
-    return NextResponse.json(payload, { status: 500 })
+    return NextResponse.json(
+      {
+        error:
+          typeof payload?.error === "string"
+            ? payload.error
+            : typeof payload?.message === "string"
+              ? payload.message
+              : "Erro ao consultar status"
+      },
+      { status: 500 }
+    )
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro ao consultar status"
     return NextResponse.json({ error: message }, { status: 500 })

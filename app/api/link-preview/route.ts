@@ -39,15 +39,23 @@ export async function GET(request: Request) {
     const meta = extractMeta(html)
 
     return NextResponse.json({
-      url: parsed.toString(),
-      title: meta.title,
-      description: meta.description,
-      image: meta.image,
-      siteName: meta.siteName
+      data: {
+        url: parsed.toString(),
+        title: meta.title,
+        description: meta.description,
+        image: meta.image,
+        siteName: meta.siteName
+      }
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Falha ao buscar preview."
-    return NextResponse.json({ url: parsed.toString(), error: message }, { status: 200 })
+    return NextResponse.json(
+      {
+        data: { url: parsed.toString() },
+        error: message
+      },
+      { status: 200 }
+    )
   } finally {
     clearTimeout(timeout)
   }

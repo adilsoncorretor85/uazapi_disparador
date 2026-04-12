@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server"
+﻿import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { normalizeWhatsappNumber } from "@/lib/utils/phone"
@@ -90,9 +90,12 @@ export async function POST(request: Request) {
   const payload = formattedRows.filter(Boolean) as Array<Record<string, unknown>>
   if (payload.length === 0) {
     return NextResponse.json({
-      inserted: 0,
-      updated: 0,
-      ignored: rows.length
+      data: {
+        inserted: 0,
+        updated: 0,
+        ignored: rows.length,
+        contacts: []
+      }
     })
   }
 
@@ -135,16 +138,8 @@ export async function POST(request: Request) {
     return digits ? !existingMap.has(digits) : false
   })
 
-  let insertedRows: Array<{
-    id: string
-    whatsapp_e164: string
-    full_name: string | null
-    first_name: string | null
-    whatsapp_digits: string
-  }> = []
-
   if (toInsert.length > 0) {
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from("contacts")
       .insert(toInsert)
       .select("id, whatsapp_e164, full_name, first_name, whatsapp_digits")
@@ -152,11 +147,26 @@ export async function POST(request: Request) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
+  }
+  const contactsRows: typeof existingRows = []
+  const chunkSize = 500
+  for (let i = 0; i < digitsList.length; i += chunkSize) {
+    const chunk = digitsList.slice(i, i + chunkSize)
+    const { data, error } = await supabase
+      .from("contacts")
+      .select("id, whatsapp_e164, full_name, first_name, whatsapp_digits")
+      .in("whatsapp_digits", chunk)
 
-    insertedRows = data ?? []
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    if (data?.length) {
+      contactsRows.push(...data)
+    }
   }
 
-  const contacts = [...existingRows, ...insertedRows].map((row) => ({
+  const contacts = contactsRows.map((row) => ({
     id: row.id,
     whatsapp_e164: row.whatsapp_e164,
     full_name: row.full_name,
@@ -164,9 +174,12 @@ export async function POST(request: Request) {
   }))
 
   return NextResponse.json({
-    inserted: insertedRows.length,
-    updated: 0,
-    ignored: invalidRows.length + existingRows.length,
-    contacts
+    data: {
+      inserted: toInsert.length,
+      updated: 0,
+      ignored: invalidRows.length + existingRows.length,
+      contacts
+    }
   })
 }
+

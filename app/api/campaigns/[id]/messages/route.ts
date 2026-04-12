@@ -1,12 +1,14 @@
-﻿import { NextResponse } from "next/server"
+import { NextResponse } from "next/server"
 import { listCampaignMessages } from "@/lib/data/messages"
+
+export const dynamic = "force-dynamic"
 
 export async function GET(
   request: Request,
   { params }: { params: { id: string } }
 ) {
   const { searchParams } = new URL(request.url)
-  const data = await listCampaignMessages(params.id, {
+  const result = await listCampaignMessages(params.id, {
     search: searchParams.get("search") ?? undefined,
     status: searchParams.get("status") ?? undefined,
     delivered: searchParams.get("delivered") ?? undefined,
@@ -21,6 +23,8 @@ export async function GET(
       : 20
   })
 
-  return NextResponse.json(data)
+  return NextResponse.json({
+    data: result.data,
+    meta: { count: result.count }
+  })
 }
-

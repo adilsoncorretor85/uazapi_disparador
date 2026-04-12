@@ -23,7 +23,7 @@ export async function listCampaignVariants(campaignId: string) {
     .order("sort_order", { ascending: true })
 
   if (error || !data) {
-    return []
+    throw error ?? new Error("Nao foi possivel carregar as variantes da campanha.")
   }
 
   const { data: usageData, error: usageError } = await supabase

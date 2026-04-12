@@ -18,39 +18,35 @@ export async function listCampaigns(filters: CampaignFilters = {}) {
     return { data: mockCampaigns, summary: buildCampaignSummary(mockCampaigns) }
   }
 
-  try {
-    const supabase = createAdminClient()
-    let query = supabase
-      .from("campaigns_with_metrics")
-      .select("*")
-      .order("updated_at", { ascending: false })
+  const supabase = createAdminClient()
+  let query = supabase
+    .from("campaigns_with_metrics")
+    .select("*")
+    .order("updated_at", { ascending: false })
 
-    if (filters.search) {
-      query = query.ilike("title", `%${filters.search}%`)
-    }
-
-    if (filters.status) {
-      query = query.eq("derived_status", filters.status)
-    }
-
-    if (filters.from) {
-      query = query.gte("created_at", filters.from)
-    }
-
-    if (filters.to) {
-      query = query.lte("created_at", filters.to)
-    }
-
-    const { data, error } = await query
-
-    if (error || !data) {
-      throw error
-    }
-
-    return { data: data as Campaign[], summary: buildCampaignSummary(data as Campaign[]) }
-  } catch (error) {
-    return { data: mockCampaigns, summary: buildCampaignSummary(mockCampaigns) }
+  if (filters.search) {
+    query = query.ilike("title", `%${filters.search}%`)
   }
+
+  if (filters.status) {
+    query = query.eq("derived_status", filters.status)
+  }
+
+  if (filters.from) {
+    query = query.gte("created_at", filters.from)
+  }
+
+  if (filters.to) {
+    query = query.lte("created_at", filters.to)
+  }
+
+  const { data, error } = await query
+
+  if (error || !data) {
+    throw error ?? new Error("Nao foi possivel listar campanhas.")
+  }
+
+  return { data: data as Campaign[], summary: buildCampaignSummary(data as Campaign[]) }
 }
 
 export async function getCampaign(id: string) {
@@ -66,7 +62,7 @@ export async function getCampaign(id: string) {
     .single()
 
   if (error) {
-    return mockCampaigns.find((campaign) => campaign.id === id) ?? mockCampaigns[0]
+    throw error
   }
 
   return data as Campaign
@@ -140,7 +136,8 @@ export async function createCampaign(values: CampaignFormValues) {
       audience_source === "file"
         ? { ...values, audience_contact_ids: audienceContactIds }
         : values,
-    variants: insertedVariants
+    variants: insertedVariants,
+    replacePending: false
   })
 
   return data as Campaign
@@ -148,6 +145,14 @@ export async function createCampaign(values: CampaignFormValues) {
 
 export async function updateCampaign(id: string, values: CampaignFormValues) {
   const supabase = createAdminClient()
+  const { data: before, error: beforeError } = await supabase
+    .from("campaigns")
+    .select("media_type, media_url, link_preview, typing_delay_seconds, message_body, use_randomizer")
+    .eq("id", id)
+    .single()
+  if (beforeError) {
+    throw beforeError
+  }
   const { variants, audience_contact_ids, audience_source, ...payload } =
     normalizeCampaignPayload(values)
   const audienceContactIds =
@@ -164,11 +169,58 @@ export async function updateCampaign(id: string, values: CampaignFormValues) {
     .eq("id", id)
     .select("*")
     .single()
-
   if (error) {
     throw error
   }
 
+  const normalizeMediaValue = (value?: string | null) => (value ? value : null)
+
+  const shouldSyncMedia =
+    normalizeMediaValue(before?.media_url ?? null) !== normalizeMediaValue(data.media_url ?? null) ||
+    (before?.media_type ?? null) !== (data.media_type ?? null) ||
+    Boolean(before?.link_preview) !== Boolean(data.link_preview) ||
+    (before?.typing_delay_seconds ?? 0) !== (data.typing_delay_seconds ?? 0)
+
+  if (shouldSyncMedia) {
+    const { error: syncError } = await supabase
+      .from("campaign_messages")
+      .update({
+        media_type: data.media_type ?? "text",
+        media_url: data.media_url ?? null,
+        link_preview: data.link_preview ?? false,
+        typing_delay_seconds: data.typing_delay_seconds ?? 0,
+        updated_at: new Date().toISOString()
+      })
+      .eq("campaign_id", id)
+      .in("status", ["pending", "locked"])
+      .is("provider_message_id", null)
+      .is("sent_at", null)
+    if (syncError) {
+      throw syncError
+    }
+  }
+
+  const normalizeText = (value?: string | null) => (value ?? "").trim()
+  const shouldSyncMessage =
+    !values.use_randomizer &&
+    normalizeText(before?.message_body ?? null) !== normalizeText(data.message_body ?? null)
+
+  if (shouldSyncMessage) {
+    const { error: messageSyncError } = await supabase
+      .from("campaign_messages")
+      .update({
+        message_body: data.message_body ?? "",
+        selected_variant_id: null,
+        updated_at: new Date().toISOString()
+      })
+      .eq("campaign_id", id)
+      .in("status", ["pending", "locked"])
+      .is("provider_message_id", null)
+      .is("sent_at", null)
+    if (messageSyncError) {
+      throw messageSyncError
+    }
+  }
   let insertedVariants: VariantSeed[] = []
   if (values.use_randomizer) {
     await supabase.from("campaign_message_variants").delete().eq("campaign_id", id)
@@ -186,7 +238,6 @@ export async function updateCampaign(id: string, values: CampaignFormValues) {
         .from("campaign_message_variants")
         .insert(variantPayload)
         .select("id, message_body, weight, is_active")
-
       if (variantError) {
         throw variantError
       }
@@ -194,6 +245,10 @@ export async function updateCampaign(id: string, values: CampaignFormValues) {
       insertedVariants = (variantRows ?? []) as VariantSeed[]
     }
   }
+  else {
+    await supabase.from("campaign_message_variants").delete().eq("campaign_id", id)
+  }
+
 
   if (audience_source === "file" && audienceContactIds.length) {
     await supabase.from("campaign_contacts").delete().eq("campaign_id", id)
@@ -223,7 +278,8 @@ export async function updateCampaign(id: string, values: CampaignFormValues) {
       audience_source === "file"
         ? { ...values, audience_contact_ids: audienceContactIds }
         : values,
-    variants: insertedVariants
+    variants: insertedVariants,
+    replacePending: true
   })
 
   return data as Campaign
@@ -279,19 +335,35 @@ export async function duplicateCampaign(id: string) {
   const original = await getCampaign(id)
   const variants = await listCampaignVariants(id)
 
-  const {
-    id: _id,
-    created_at,
-    updated_at,
-    started_at,
-    completed_at,
-    total_numbers,
-    total_sent,
-    total_delivered,
-    total_read,
-    total_failed,
-    ...rest
-  } = original
+  const rest = {
+    instance_id: original.instance_id,
+    title: original.title,
+    description: original.description,
+    status: original.status,
+    use_randomizer: original.use_randomizer,
+    message_body: original.message_body,
+    media_type: original.media_type,
+    media_url: original.media_url,
+    scheduled_at: original.scheduled_at,
+    timezone: original.timezone,
+    audience_tags: original.audience_tags,
+    audience_tags_exclude: original.audience_tags_exclude,
+    audience_cities: original.audience_cities,
+    audience_bairros: original.audience_bairros,
+    audience_ruas: original.audience_ruas,
+    delay_min_seconds: original.delay_min_seconds,
+    delay_max_seconds: original.delay_max_seconds,
+    batch_size: original.batch_size,
+    max_attempts: original.max_attempts,
+    readchat: original.readchat,
+    use_composing: original.use_composing,
+    typing_delay_seconds: original.typing_delay_seconds,
+    link_preview: original.link_preview,
+    link_preview_title: original.link_preview_title,
+    link_preview_description: original.link_preview_description,
+    link_preview_image: original.link_preview_image,
+    link_preview_large: original.link_preview_large
+  }
 
   const { data: newCampaign, error } = await supabase
     .from("campaigns")
@@ -340,23 +412,35 @@ function normalizeCampaignPayload(values: CampaignFormValues) {
   const audienceCities = normalizeStringArray(values.audience_cities)
   const audienceBairros = normalizeStringArray(values.audience_bairros)
   const audienceRuas = normalizeStringArray(values.audience_ruas)
+  const inferredMediaType = inferMediaTypeFromUrl(values.media_url ?? null)
+  const normalizedMediaType =
+    values.media_type === "none" || values.media_type === "link" || !values.media_type
+      ? inferredMediaType ?? "text"
+      : values.media_type
 
   return {
     ...values,
     scheduled_at: values.scheduled_at ? values.scheduled_at : null,
     timezone: values.timezone || "America/Sao_Paulo",
     media_url: values.media_url ? values.media_url : null,
-    media_type:
-      values.media_type === "none" || values.media_type === "link" || !values.media_type
-        ? "text"
-        : values.media_type,
+    media_type: normalizedMediaType,
     link_preview: values.media_type === "link" ? true : values.link_preview ?? false,
     typing_delay_seconds: values.use_composing ? values.typing_delay_seconds ?? 6 : 0,
     delay_min_seconds: delayMin,
     delay_max_seconds: delayMax,
     batch_size: values.batch_size ?? 50,
     max_attempts: values.max_attempts ?? 3,
-    variants: values.use_randomizer ? values.variants : [],
+    variants: values.use_randomizer
+      ? (values.variants ?? [])
+          .map((variant, index) => ({
+            ...variant,
+            message_body: (variant.message_body ?? "").trim(),
+            weight: variant.weight ?? 1,
+            is_active: variant.is_active ?? true,
+            sort_order: index + 1
+          }))
+          .filter((variant) => Boolean(variant.message_body))
+      : [],
     audience_tags: isBaseAudience ? audienceTags : [],
     audience_tags_exclude: isBaseAudience ? audienceTagsExclude : [],
     audience_cities: isBaseAudience ? audienceCities : [],
@@ -394,31 +478,30 @@ interface ContactSeed {
   whatsapp_digits: string
 }
 
+interface ExistingMessageRow {
+  id: string | number
+  contact_id?: string | null
+  phone_e164?: string | null
+  status?: string | null
+  provider_message_id?: string | null
+  sent_at?: string | null
+  processed?: boolean | null
+}
+
 async function seedCampaignMessages({
   supabase,
   campaign,
   values,
-  variants
+  variants,
+  replacePending = false
 }: {
   supabase: ReturnType<typeof createAdminClient>
   campaign: Campaign
   values: CampaignFormValues
   variants: VariantSeed[]
+  replacePending?: boolean
 }) {
   if (!campaign?.id) {
-    return
-  }
-
-  const { count: existingCount, error: countError } = await supabase
-    .from("campaign_messages")
-    .select("id", { count: "exact", head: true })
-    .eq("campaign_id", campaign.id)
-
-  if (countError) {
-    throw countError
-  }
-
-  if ((existingCount ?? 0) > 0) {
     return
   }
 
@@ -449,6 +532,54 @@ async function seedCampaignMessages({
 
   if (!values.use_randomizer && requiresMessage && !baseMessage) {
     throw new Error("Mensagem obrigatória para gerar envios")
+  }
+
+  const { data: existingRows, error: existingError } = await supabase
+    .from("campaign_messages")
+    .select("id, contact_id, phone_e164, status, provider_message_id, sent_at, processed")
+    .eq("campaign_id", campaign.id)
+
+  if (existingError) {
+    throw existingError
+  }
+
+  const existingMessages = (existingRows ?? []) as ExistingMessageRow[]
+  if (!replacePending && existingMessages.length > 0) {
+    return
+  }
+
+  const preservedContactIds = new Set<string>()
+  const preservedPhones = new Set<string>()
+
+  for (const row of existingMessages) {
+    const preserve =
+      Boolean(row.provider_message_id) ||
+      Boolean(row.sent_at) ||
+      Boolean(row.processed) ||
+      !["pending", "locked"].includes(row.status ?? "pending")
+
+    if (preserve) {
+      if (row.contact_id) {
+        preservedContactIds.add(row.contact_id)
+      }
+      if (row.phone_e164) {
+        preservedPhones.add(row.phone_e164)
+      }
+      continue
+    }
+  }
+
+  const { error: deleteError } = await supabase
+    .from("campaign_messages")
+    .delete()
+    .eq("campaign_id", campaign.id)
+    .in("status", ["pending", "locked"])
+    .is("provider_message_id", null)
+    .is("sent_at", null)
+    .or("processed.is.null,processed.eq.false")
+
+  if (deleteError) {
+    throw deleteError
   }
 
   const pickVariant = () => {
@@ -489,17 +620,57 @@ async function seedCampaignMessages({
       }
     })
 
-    const { error } = await supabase.from("campaign_messages").insert(payload)
+    const { error } = await supabase
+      .from("campaign_messages")
+      .upsert(payload, {
+        onConflict: "campaign_id,phone_e164",
+        ignoreDuplicates: true
+      })
     if (error) {
       throw error
     }
     return payload.length
   }
 
-  let totalInserted = 0
+  const eligibleContacts = await resolveAudienceContacts({
+    supabase,
+    campaign,
+    values
+  })
 
+  const contactsToInsert = uniqueContactsByPhone(
+    eligibleContacts.filter(
+    (contact) =>
+      !preservedContactIds.has(contact.id) &&
+      !preservedPhones.has(contact.whatsapp_e164)
+    )
+  )
+
+  let totalInserted = 0
+  for (const chunk of chunkArray(contactsToInsert, 500)) {
+    totalInserted += await insertBatch(chunk)
+  }
+
+  if (existingMessages.length === 0 && totalInserted === 0) {
+    throw new Error(
+      "Nenhum contato elegível para gerar envios. Verifique se há contatos válidos na instância."
+    )
+  }
+
+  await syncCampaignMetrics(supabase, campaign.id)
+}
+
+async function resolveAudienceContacts({
+  supabase,
+  campaign,
+  values
+}: {
+  supabase: ReturnType<typeof createAdminClient>
+  campaign: Campaign
+  values: CampaignFormValues
+}) {
   if (values.audience_source === "file") {
-    let contactIds = values.audience_contact_ids ?? []
+    let contactIds = uniqueStrings(values.audience_contact_ids)
     if (contactIds.length === 0) {
       const { data: campaignContacts, error: contactError } = await supabase
         .from("campaign_contacts")
@@ -510,17 +681,17 @@ async function seedCampaignMessages({
         throw contactError
       }
 
-      contactIds = (campaignContacts ?? []).map((row) => row.contact_id as string)
+      contactIds = uniqueStrings((campaignContacts ?? []).map((row) => row.contact_id as string))
     }
 
     if (contactIds.length === 0) {
       throw new Error("Nenhum contato importado. Envie a planilha para gerar envios.")
     }
 
-    const contactChunkSize = 100
-    for (const chunk of chunkArray(contactIds, contactChunkSize)) {
+    const contacts: ContactSeed[] = []
+    for (const chunk of chunkArray(contactIds, 100)) {
       if (!chunk.length) continue
-      const { data: contacts, error } = await supabase
+      const { data, error } = await supabase
         .from("contacts")
         .select("id, whatsapp_e164, whatsapp_digits")
         .in("id", chunk)
@@ -533,73 +704,152 @@ async function seedCampaignMessages({
         throw error
       }
 
-      totalInserted += await insertBatch((contacts ?? []) as ContactSeed[])
+      contacts.push(...((data ?? []) as ContactSeed[]))
     }
-  } else {
-    const includeTags = normalizeStringArray(values.audience_tags)
-    const excludeTags = normalizeStringArray(values.audience_tags_exclude)
-    const cities = normalizeStringArray(values.audience_cities)
-    const bairros = normalizeStringArray(values.audience_bairros)
-    const ruas = normalizeStringArray(values.audience_ruas)
 
-    let from = 0
-    const pageSize = 500
-    while (true) {
-      let query = supabase
-        .from("contacts")
-        .select("id, whatsapp_e164, whatsapp_digits")
-        .eq("instance_id", campaign.instance_id)
-        .eq("opted_in", true)
-        .eq("is_valid", true)
-        .not("whatsapp_e164", "is", null)
-        .not("whatsapp_digits", "is", null)
-        .order("created_at", { ascending: true })
-        .range(from, from + pageSize - 1)
-
-      if (cities.length) {
-        query = query.in("city", cities)
-      }
-      if (bairros.length) {
-        query = query.in("bairro", bairros)
-      }
-      if (ruas.length) {
-        query = query.in("rua", ruas)
-      }
-      if (includeTags.length) {
-        query = query.overlaps("tags", includeTags)
-      }
-      if (excludeTags.length) {
-        query = query.not("tags", "ov", excludeTags)
-      }
-
-      const { data: contacts, error } = await query
-
-      if (error) {
-        throw error
-      }
-
-      if (!contacts || contacts.length === 0) {
-        break
-      }
-
-      totalInserted += await insertBatch(contacts as ContactSeed[])
-      from += pageSize
-    }
+    return contacts
   }
 
-  if (totalInserted === 0) {
-    throw new Error(
-      "Nenhum contato elegível para gerar envios. Verifique se há contatos válidos na instância."
-    )
+  const includeTags = normalizeStringArray(values.audience_tags)
+  const excludeTags = normalizeStringArray(values.audience_tags_exclude)
+  const cities = normalizeStringArray(values.audience_cities)
+  const bairros = normalizeStringArray(values.audience_bairros)
+  const ruas = normalizeStringArray(values.audience_ruas)
+
+  const contacts: ContactSeed[] = []
+  let from = 0
+  const pageSize = 500
+
+  while (true) {
+    let query = supabase
+      .from("contacts")
+      .select("id, whatsapp_e164, whatsapp_digits")
+      .eq("instance_id", campaign.instance_id)
+      .eq("opted_in", true)
+      .eq("is_valid", true)
+      .not("whatsapp_e164", "is", null)
+      .not("whatsapp_digits", "is", null)
+      .order("created_at", { ascending: true })
+      .range(from, from + pageSize - 1)
+
+    if (cities.length) {
+      query = query.in("city", cities)
+    }
+    if (bairros.length) {
+      query = query.in("bairro", bairros)
+    }
+    if (ruas.length) {
+      query = query.in("rua", ruas)
+    }
+    if (includeTags.length) {
+      query = query.overlaps("tags", includeTags)
+    }
+    if (excludeTags.length) {
+      query = query.not("tags", "ov", excludeTags)
+    }
+
+    const { data, error } = await query
+
+    if (error) {
+      throw error
+    }
+
+    if (!data?.length) {
+      break
+    }
+
+    contacts.push(...(data as ContactSeed[]))
+    from += pageSize
   }
 
-  await supabase
+  return contacts
+}
+
+async function syncCampaignMetrics(
+  supabase: ReturnType<typeof createAdminClient>,
+  campaignId: string | number
+) {
+  const campaignKey =
+    typeof campaignId === "string" && /^\d+$/.test(campaignId)
+      ? Number(campaignId)
+      : campaignId
+
+  const [
+    totalResult,
+    processedResult,
+    sentResult,
+    deliveredResult,
+    readResult,
+    failedResult
+  ] = await Promise.all([
+    supabase
+      .from("campaign_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignKey),
+    supabase
+      .from("campaign_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignKey)
+      .eq("processed", true),
+    supabase
+      .from("campaign_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignKey)
+      .in("status", ["sending", "sent", "delivered", "read", "played"]),
+    supabase
+      .from("campaign_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignKey)
+      .or("is_delivered.eq.true,delivered_at.not.is.null"),
+    supabase
+      .from("campaign_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignKey)
+      .or("is_read.eq.true,read_at.not.is.null"),
+    supabase
+      .from("campaign_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignKey)
+      .or("status.eq.failed,failed_at.not.is.null")
+  ])
+
+  const errors = [
+    totalResult.error,
+    processedResult.error,
+    sentResult.error,
+    deliveredResult.error,
+    readResult.error,
+    failedResult.error
+  ].filter(Boolean)
+
+  if (errors.length > 0) {
+    throw errors[0]
+  }
+
+  const { error: updateError } = await supabase
     .from("campaigns")
     .update({
-      total_numbers: totalInserted,
+      total_numbers: totalResult.count ?? 0,
+      total_sent: sentResult.count ?? 0,
+      total_delivered: deliveredResult.count ?? 0,
+      total_read: readResult.count ?? 0,
+      total_failed: failedResult.count ?? 0,
       updated_at: new Date().toISOString()
     })
-    .eq("id", campaign.id)
+    .eq("id", campaignKey)
+
+  if (updateError) {
+    throw updateError
+  }
+
+  return {
+    total_numbers: totalResult.count ?? 0,
+    total_processed: processedResult.count ?? 0,
+    total_sent: sentResult.count ?? 0,
+    total_delivered: deliveredResult.count ?? 0,
+    total_read: readResult.count ?? 0,
+    total_failed: failedResult.count ?? 0
+  }
 }
 
 function chunkArray<T>(items: T[], size: number) {
@@ -620,7 +870,149 @@ function uniqueStrings(values?: Array<string | null | undefined>) {
   return Array.from(new Set(normalized))
 }
 
+function uniqueContactsByPhone(contacts: ContactSeed[]) {
+  const seen = new Set<string>()
+  return contacts.filter((contact) => {
+    const key = (contact.whatsapp_e164 ?? "").trim() || (contact.whatsapp_digits ?? "").trim()
+    if (!key || seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    return true
+  })
+}
 
 
 
+
+
+
+export async function deleteCampaign(id: string) {
+  if (!env.SUPABASE_SERVICE_ROLE_KEY) {
+    return { id }
+  }
+
+  const supabase = createAdminClient()
+
+  const { error: messagesError } = await supabase
+    .from("campaign_messages")
+    .delete()
+    .eq("campaign_id", id)
+
+  if (messagesError) {
+    throw messagesError
+  }
+
+  const { error: variantsError } = await supabase
+    .from("campaign_message_variants")
+    .delete()
+    .eq("campaign_id", id)
+
+  if (variantsError) {
+    throw variantsError
+  }
+
+  const { error: contactsError } = await supabase
+    .from("campaign_contacts")
+    .delete()
+    .eq("campaign_id", id)
+
+  if (contactsError) {
+    throw contactsError
+  }
+
+  const { error: campaignError } = await supabase
+    .from("campaigns")
+    .delete()
+    .eq("id", id)
+
+  if (campaignError) {
+    throw campaignError
+  }
+
+  return { id }
+}
+
+
+
+export async function listCampaignContactsPage(id: string, offset = 0, limit = 1000) {
+  if (!env.SUPABASE_SERVICE_ROLE_KEY) {
+    return { data: [], nextOffset: null }
+  }
+
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("campaign_contacts")
+    .select("contact_id, contacts:contacts(id, whatsapp_e164, first_name, full_name)")
+    .eq("campaign_id", id)
+    .range(offset, offset + limit - 1)
+
+  if (error) {
+    throw error
+  }
+
+  type ContactJoin = {
+    id: string
+    whatsapp_e164: string
+    first_name?: string | null
+    full_name?: string | null
+  }
+
+  type CampaignContactJoinRow = {
+    contact_id: string
+    contacts: ContactJoin | ContactJoin[] | null
+  }
+
+  const contacts = ((data ?? []) as CampaignContactJoinRow[]).flatMap((row) => {
+    if (!row.contacts) return []
+    return Array.isArray(row.contacts) ? row.contacts : [row.contacts]
+  })
+
+  const returned = data?.length ?? 0
+  const nextOffset = returned === limit ? offset + limit : null
+  return { data: contacts, nextOffset }
+}
+
+
+export async function listCampaignContacts(id: string) {
+  if (!env.SUPABASE_SERVICE_ROLE_KEY) {
+    return []
+  }
+
+  const pageSize = 1000
+  let offset = 0
+  const all: Array<{
+    id: string
+    whatsapp_e164: string
+    first_name?: string | null
+    full_name?: string | null
+  }> = []
+
+  while (true) {
+    const { data, nextOffset } = await listCampaignContactsPage(id, offset, pageSize)
+    all.push(...data)
+    if (nextOffset === null) break
+    offset = nextOffset
+  }
+
+  return all
+}
+
+
+
+
+
+
+
+function inferMediaTypeFromUrl(url?: string | null) {
+  if (!url) return null
+  const clean = url.split("?")[0]
+  const ext = clean.split(".").pop()?.toLowerCase()
+  if (!ext) return null
+  if (["mp4", "mov", "webm", "m4v"].includes(ext)) return "video"
+  if (["mp3", "wav", "ogg", "m4a", "aac"].includes(ext)) return "audio"
+  if (["jpg", "jpeg", "png", "gif", "webp"].includes(ext)) return "image"
+  if (["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"].includes(ext)) return "document"
+  return null
+}
 

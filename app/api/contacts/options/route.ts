@@ -44,10 +44,12 @@ export async function GET(request: Request) {
     const row = Array.isArray(data) ? data[0] : data
 
     return NextResponse.json({
-      tags: row?.tags ?? [],
-      cities: row?.cities ?? [],
-      bairros: row?.bairros ?? [],
-      ruas: row?.ruas ?? []
+      data: {
+        tags: row?.tags ?? [],
+        cities: row?.cities ?? [],
+        bairros: row?.bairros ?? [],
+        ruas: row?.ruas ?? []
+      }
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro ao carregar filtros"

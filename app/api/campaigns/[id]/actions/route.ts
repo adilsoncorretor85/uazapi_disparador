@@ -1,5 +1,5 @@
 ﻿import { NextResponse } from "next/server"
-import { duplicateCampaign, updateCampaignStatus } from "@/lib/data/campaigns"
+import { duplicateCampaign, updateCampaignStatus, deleteCampaign } from "@/lib/data/campaigns"
 import type { CampaignStatus } from "@/lib/constants/status"
 
 const STATUS_ACTIONS: Record<string, CampaignStatus> = {
@@ -22,7 +22,11 @@ export async function POST(
 
   if (action === "duplicate") {
     const campaign = await duplicateCampaign(params.id)
-    return NextResponse.json({ campaign })
+    return NextResponse.json({ data: campaign })
+  }
+  if (action === "delete") {
+    const result = await deleteCampaign(params.id)
+    return NextResponse.json({ data: result })
   }
 
   const status = STATUS_ACTIONS[action]
@@ -31,5 +35,6 @@ export async function POST(
   }
 
   const campaign = await updateCampaignStatus(params.id, status)
-  return NextResponse.json({ campaign })
+  return NextResponse.json({ data: campaign })
 }
+

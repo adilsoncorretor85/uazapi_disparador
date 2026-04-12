@@ -1,9 +1,9 @@
-import { apiFetch } from "@/lib/services/http"
+﻿import { apiFetch, type ApiResponse } from "@/lib/services/http"
 import type { Contact } from "@/types/entities"
 
 export async function fetchContacts(params: Record<string, string> = {}) {
   const query = new URLSearchParams(params)
-  return apiFetch<Contact[]>(`/api/contacts?${query.toString()}`)
+  return apiFetch<ApiResponse<Contact[]>>(`/api/contacts?${query.toString()}`)
 }
 
 export interface ImportContactRow {
@@ -36,7 +36,7 @@ export async function importContacts(
   instanceId: string,
   defaultDdd?: string
 ) {
-  return apiFetch<ImportContactsResponse>("/api/contacts/import", {
+  return apiFetch<ApiResponse<ImportContactsResponse>>("/api/contacts/import", {
     method: "POST",
     body: JSON.stringify({
       rows,
@@ -60,5 +60,7 @@ export async function fetchContactFilterOptions(
   if (params.citySearch) query.set("city_search", params.citySearch)
   if (params.city) query.set("city", params.city)
   if (params.bairro) query.set("bairro", params.bairro)
-  return apiFetch<ContactFilterOptions>(`/api/contacts/options?${query.toString()}`)
+  return apiFetch<ApiResponse<ContactFilterOptions>>(
+    `/api/contacts/options?${query.toString()}`
+  )
 }

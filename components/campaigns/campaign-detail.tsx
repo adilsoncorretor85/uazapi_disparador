@@ -9,12 +9,13 @@ import {
   PauseCircle,
   PlayCircle,
   RefreshCcw,
-  StopCircle
+  StopCircle,
+  Trash2
 } from "lucide-react"
 
 import { duplicateCampaign, fetchCampaign, runCampaignAction } from "@/lib/services/campaigns"
 import { formatDateTime, formatNumber, formatPercent } from "@/lib/format"
-import { CAMPAIGN_STATUS_LABELS } from "@/lib/constants/status"
+import { CAMPAIGN_STATUS_LABELS, canDeleteCampaign } from "@/lib/constants/status"
 import { PageHeader } from "@/components/common/page-header"
 import { StatusBadge } from "@/components/common/status-badge"
 import { KpiCard } from "@/components/common/kpi-card"
@@ -31,10 +32,12 @@ export default function CampaignDetail() {
   const router = useRouter()
   const queryClient = useQueryClient()
 
-  const { data: campaign, isLoading } = useQuery({
+  const { data: campaignResponse, isLoading } = useQuery({
     queryKey: ["campaign", params.id],
     queryFn: () => fetchCampaign(params.id)
   })
+
+  const campaign = campaignResponse?.data
 
   const actionMutation = useMutation({
     mutationFn: async ({ action }: { action: string }) => {
@@ -47,8 +50,9 @@ export default function CampaignDetail() {
       queryClient.invalidateQueries({ queryKey: ["campaign", params.id] })
       queryClient.invalidateQueries({ queryKey: ["campaigns"] })
       if (variables.action === "duplicate") {
-        router.push(`/campaigns/${result.campaign.id}`)
+        if (result?.data?.id) { router.push(`/campaigns/${result.data.id}`) }
       }
+      if (variables.action === "delete") { router.push("/campaigns") }
     }
   })
 
@@ -84,6 +88,7 @@ export default function CampaignDetail() {
     displayStatus === "paused"
   const canPause = displayStatus === "processing"
   const canResume = displayStatus === "paused"
+  const canDelete = canDeleteCampaign(displayStatus)
 
   return (
     <div className="space-y-6">
@@ -129,6 +134,19 @@ export default function CampaignDetail() {
               <StopCircle className="mr-2 h-4 w-4" />
               Cancelar
             </Button>
+            {canDelete ? (
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  if (confirm("Excluir campanha? Isso remove envios, variantes e público desta campanha.")) {
+                    actionMutation.mutate({ action: "delete" })
+                  }
+                }}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Excluir
+              </Button>
+            ) : null}
             <Button
               variant="ghost"
               onClick={() => queryClient.invalidateQueries({ queryKey: ["campaign", params.id] })}
@@ -240,17 +258,28 @@ export default function CampaignDetail() {
         </TabsContent>
 
         <TabsContent value="variants">
-          <CampaignVariants campaignId={campaign.id} />
+          <CampaignVariants campaignId={String(campaign.id)} />
         </TabsContent>
 
         <TabsContent value="messages">
-          <CampaignMessagesTable campaignId={campaign.id} />
+          <CampaignMessagesTable campaignId={String(campaign.id)} />
         </TabsContent>
 
         <TabsContent value="audit">
-          <CampaignAudit campaignId={campaign.id} />
+          <CampaignAudit campaignId={String(campaign.id)} />
         </TabsContent>
       </Tabs>
     </div>
   )
 }
+
+
+
+
+
+
+
+
+
+
+

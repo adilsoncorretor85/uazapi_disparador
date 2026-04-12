@@ -1,10 +1,10 @@
 ﻿"use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Pencil, AlertCircle, Copy, ChevronDown } from "lucide-react"
 import type { WhatsAppInstance } from "@/types/entities"
-import { deriveConnectionLabel } from "@/lib/utils/instance-connection"
+import { deriveConnectionLabel, normalizeConnectionStatus, isInstanceConnected } from "@/lib/utils/instance-connection"
 import {
   fetchInstances,
   updateInstance,
@@ -32,19 +32,27 @@ function formatHour(time?: string | null) {
   return `${hour}h`
 }
 
+const PAUSE_TIME_OPTIONS = ["17:00", "18:00", "19:00", "20:00", "21:00", "22:00"] as const
+const RESUME_TIME_OPTIONS = ["07:00", "08:00", "09:00", "12:00", "13:00"] as const
+
 function normalizeTime(value?: string | null) {
   if (!value) return undefined
   const match = value.match(/^(\d{2}):(\d{2})/)
   return match ? `${match[1]}:${match[2]}` : value
 }
 
-function formatConnectionLabel(value?: string | null) {
-  if (!value) return "Desconectado"
-  const normalized = value.toLowerCase()
-  if (normalized === "connecting") return "Conectando"
-  if (normalized === "connected") return "Conectado"
-  if (normalized === "disconnected") return "Desconectado"
-  return value
+function normalizePauseTime(value?: string | null): InstanceFormValues["campanha_horario_pause"] {
+  const normalized = normalizeTime(value)
+  return PAUSE_TIME_OPTIONS.includes(normalized as (typeof PAUSE_TIME_OPTIONS)[number])
+    ? (normalized as (typeof PAUSE_TIME_OPTIONS)[number])
+    : undefined
+}
+
+function normalizeResumeTime(value?: string | null): InstanceFormValues["campanha_horario_reinicio"] {
+  const normalized = normalizeTime(value)
+  return RESUME_TIME_OPTIONS.includes(normalized as (typeof RESUME_TIME_OPTIONS)[number])
+    ? (normalized as (typeof RESUME_TIME_OPTIONS)[number])
+    : undefined
 }
 
 export default function InstancesPanel() {
@@ -119,9 +127,10 @@ export default function InstancesPanel() {
       }
     },
     onSuccess: (data) => {
-      setConnectionPayload(data as Record<string, unknown>)
-      const nextQr = extractQr(data as Record<string, unknown>)
-      const nextPair = extractPairCode(data as Record<string, unknown>)
+      const payload = data.data as Record<string, unknown>
+      setConnectionPayload(payload)
+      const nextQr = extractQr(payload)
+      const nextPair = extractPairCode(payload)
       if (nextQr) setQrCode(nextQr)
       if (nextPair) setPairCode(nextPair)
       setLastStatusAt(new Date().toLocaleTimeString())
@@ -154,7 +163,7 @@ export default function InstancesPanel() {
     }
   })
 
-  const instances = data ?? []
+  const instances = useMemo(() => data?.data ?? [], [data])
 
   const isConnectedPayload = (payload: Record<string, unknown> | null) => {
     if (!payload) return false
@@ -179,6 +188,26 @@ export default function InstancesPanel() {
     return derivedLabel === "Conectado"
   }
 
+  const statusMutation = useMutation({
+    mutationFn: (id: string) => fetchInstanceStatus(id),
+    onSuccess: (data) => {
+      const payload = data.data as Record<string, unknown>
+      setConnectionPayload(payload)
+      const nextQr = extractQr(payload)
+      const nextPair = extractPairCode(payload)
+      if (nextQr) setQrCode(nextQr)
+      if (nextPair) setPairCode(nextPair)
+      setLastStatusAt(new Date().toLocaleTimeString())
+      queryClient.invalidateQueries({ queryKey: ["instances"] })
+      if (isConnectedPayload(payload)) {
+        closeConnectionModal()
+      }
+    },
+    onError: (err: Error) => {
+      setError(err.message)
+    }
+  })
+
   useEffect(() => {
     if (!pollingActive || !connectionInstanceId) return
     const tick = () => {
@@ -194,11 +223,11 @@ export default function InstancesPanel() {
         pollRef.current = null
       }
     }
-  }, [pollingActive, connectionInstanceId])
+  }, [pollingActive, connectionInstanceId, statusMutation])
 
   useEffect(() => {
     const connectingIds = instances
-      .filter((inst) => formatConnectionLabel(inst.conexao_w) === "Conectando")
+      .filter((inst) => normalizeConnectionStatus(inst.conexao_w) === "Conectando")
       .map((inst) => inst.id)
 
     if (connectingIds.length === 0) {
@@ -258,26 +287,8 @@ export default function InstancesPanel() {
         refreshRef.current = null
       }
     }
-  }, [connectionOpen, connectionInstanceId, connectionMode, connectionPayload, pairCode, qrCode])
+  }, [connectionOpen, connectionInstanceId, connectionMode, connectionPayload, pairCode, qrCode, connectMutation])
 
-  const statusMutation = useMutation({
-    mutationFn: (id: string) => fetchInstanceStatus(id),
-    onSuccess: (data) => {
-      setConnectionPayload(data as Record<string, unknown>)
-      const nextQr = extractQr(data as Record<string, unknown>)
-      const nextPair = extractPairCode(data as Record<string, unknown>)
-      if (nextQr) setQrCode(nextQr)
-      if (nextPair) setPairCode(nextPair)
-      setLastStatusAt(new Date().toLocaleTimeString())
-      queryClient.invalidateQueries({ queryKey: ["instances"] })
-      if (isConnectedPayload(data as Record<string, unknown>)) {
-        closeConnectionModal()
-      }
-    },
-    onError: (err: Error) => {
-      setError(err.message)
-    }
-  })
 
   const handleCloseConnection = async () => {
     if (connectionInstanceId) {
@@ -301,7 +312,7 @@ export default function InstancesPanel() {
     if (!connectionOpen || !connectionInstanceId) return
     const current = instances.find((item) => item.id === connectionInstanceId)
     if (!current) return
-    if (formatConnectionLabel(current.conexao_w) === "Conectado") {
+    if (normalizeConnectionStatus(current.conexao_w) === "Conectado") {
       closeConnectionModal()
     }
   }, [instances, connectionOpen, connectionInstanceId])
@@ -385,8 +396,8 @@ export default function InstancesPanel() {
               </TableRow>
             ) : (
               instances.map((instance) => {
-                const connectionLabel = formatConnectionLabel(instance.conexao_w)
-                const isConnected = connectionLabel === "Conectado"
+                const connectionLabel = normalizeConnectionStatus(instance.conexao_w)
+                const isConnected = isInstanceConnected(instance.conexao_w)
 
                 return (
                   <TableRow key={instance.id}>
@@ -515,11 +526,11 @@ export default function InstancesPanel() {
                 campanha_pause: editing.campanha_pause ?? false,
                 campanha_horario_pause:
                   editing.campanha_pause
-                    ? normalizeTime(editing.campanha_horario_pause) ?? "20:00"
+                    ? normalizePauseTime(editing.campanha_horario_pause) ?? "20:00"
                     : null,
                 campanha_horario_reinicio:
                   editing.campanha_pause
-                    ? normalizeTime(editing.campanha_horario_reinicio) ?? "07:00"
+                    ? normalizeResumeTime(editing.campanha_horario_reinicio) ?? "07:00"
                     : null,
                 is_active: editing.is_active,
                 throttle_per_minute: editing.throttle_per_minute ?? 60
@@ -661,3 +672,9 @@ export default function InstancesPanel() {
     </div>
   )
 }
+
+
+
+
+
+

@@ -4,22 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useForm, useFieldArray } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useQuery } from "@tanstack/react-query"
-import * as XLSX from "xlsx"
-import {
-  ArrowDown,
-  ArrowUp,
-  Plus,
-  Trash2,
-  MessageSquare,
-  Image as ImageIcon,
-  Mic,
-  Video,
-  FileText,
-  Link2,
-  Users,
-  Upload,
-  AlertCircle
-} from "lucide-react"
+import { AlertCircle } from "lucide-react"
 
 import {
   campaignFormSchema,
@@ -28,43 +13,46 @@ import {
 import { fetchInstances } from "@/lib/services/instances"
 import { fetchContactFilterOptions, importContacts } from "@/lib/services/contacts"
 import { uploadMedia } from "@/lib/services/storage"
-import { formatNumber } from "@/lib/format"
-import { cn } from "@/lib/utils"
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage
-} from "@/components/ui/form"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { Switch } from "@/components/ui/switch"
+import { Form } from "@/components/ui/form"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select"
-import { Badge } from "@/components/ui/badge"
-import { Checkbox } from "@/components/ui/checkbox"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { WhatsAppMessageEditor } from "@/components/common/whatsapp-message-editor"
 import { WhatsAppPreview } from "@/components/common/whatsapp-preview"
+import { CampaignBasicsSection } from "@/components/forms/campaign/sections/CampaignBasicsSection"
+import { CampaignAudienceSection } from "@/components/forms/campaign/sections/CampaignAudienceSection"
+import { CampaignContentSection } from "@/components/forms/campaign/sections/CampaignContentSection"
+import { CampaignDeliverySection } from "@/components/forms/campaign/sections/CampaignDeliverySection"
+import { CampaignRandomizerSection } from "@/components/forms/campaign/sections/CampaignRandomizerSection"
+import { CampaignSummarySection } from "@/components/forms/campaign/sections/CampaignSummarySection"
+import {
+  DEFAULT_TIMEZONE,
+  dateTimeInTimeZoneToUtcIso,
+  formatDateTimeInTimeZone,
+  splitDateTimeInTimeZone
+} from "@/components/forms/campaign/helpers/date-time"
+import { parseContactsTemplate } from "@/components/forms/campaign/helpers/import-template"
+import { findFirstErrorMessage } from "@/components/forms/campaign/helpers/form-errors"
+import { normalizeCampaignFormValues } from "@/components/forms/campaign/helpers/normalize"
+import { applySubmitIntent } from "@/components/forms/campaign/helpers/submit"
+import { getAcceptTypes, MAX_VIDEO_BYTES } from "@/components/forms/campaign/helpers/content"
+import { useLinkPreview } from "@/components/forms/campaign/hooks/useLinkPreview"
+import { isInstanceConnected } from "@/lib/utils/instance-connection"
+
+type AudienceContact = {
+  id: string
+  whatsapp_e164: string
+  first_name?: string | null
+  full_name?: string | null
+}
 
 interface CampaignFormProps {
   initialData?: CampaignFormValues
+  initialImportedContacts?: AudienceContact[]
   onSubmit: (values: CampaignFormValues) => Promise<void>
   mode?: "create" | "edit"
   isSubmitting?: boolean
   submitError?: string | null
+  allowPublishFromDraft?: boolean
 }
-
-const DEFAULT_TIMEZONE = "America/Sao_Paulo"
 
 const defaultValues: CampaignFormValues = {
   title: "",
@@ -95,251 +83,50 @@ const defaultValues: CampaignFormValues = {
   audience_contact_ids: []
 }
 
-const pad2 = (num: number) => String(num).padStart(2, "0")
-
-function getTimeZoneParts(date: Date, timeZone: string) {
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23"
-  })
-  const parts = formatter.formatToParts(date)
-  const map: Record<string, string> = {}
-  parts.forEach((part) => {
-    if (part.type !== "literal") {
-      map[part.type] = part.value
-    }
-  })
-  return {
-    year: Number(map.year),
-    month: Number(map.month),
-    day: Number(map.day),
-    hour: Number(map.hour),
-    minute: Number(map.minute)
-  }
-}
-
-function formatDateTimeInTimeZone(value?: string | null, timeZone = DEFAULT_TIMEZONE) {
-  if (!value) return ""
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  const parts = getTimeZoneParts(date, timeZone)
-  return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}T${pad2(
-    parts.hour
-  )}:${pad2(parts.minute)}`
-}
-
-function splitDateTimeInTimeZone(value?: string | null, timeZone = DEFAULT_TIMEZONE) {
-  if (!value) return { date: "", time: "" }
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return { date: "", time: "" }
-  const parts = getTimeZoneParts(date, timeZone)
-  return {
-    date: `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`,
-    time: `${pad2(parts.hour)}:${pad2(parts.minute)}`
-  }
-}
-
-function dateTimeInTimeZoneToUtcIso(
-  dateValue: string,
-  timeValue: string,
-  timeZone = DEFAULT_TIMEZONE
-) {
-  if (!dateValue || !timeValue) return null
-  const [year, month, day] = dateValue.split("-").map(Number)
-  const [hour, minute] = timeValue.split(":").map(Number)
-  if (
-    [year, month, day, hour, minute].some((value) => Number.isNaN(value))
-  ) {
-    return null
-  }
-
-  const utcGuess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0))
-  const actual = getTimeZoneParts(utcGuess, timeZone)
-  const actualUtc = Date.UTC(
-    actual.year,
-    actual.month - 1,
-    actual.day,
-    actual.hour,
-    actual.minute,
-    0
-  )
-  const intendedUtc = Date.UTC(year, month - 1, day, hour, minute, 0)
-  const diffMs = intendedUtc - actualUtc
-  return new Date(utcGuess.getTime() + diffMs).toISOString()
-}
-
-const TEMPLATE_HEADERS = [
-  "nome",
-  "telefone",
-  "email",
-  "data_nascimento",
-  "genero",
-  "tags",
-  "bairro",
-  "cep",
-  "rua",
-  "cidade",
-  "estado",
-  "numero_residencia",
-  "complemento",
-  "ponto_referencia"
-]
-
-function normalizeHeader(value: string) {
-  return value
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, "_")
-    .replace(/[^a-z0-9_]/g, "")
-}
-
-const TEMPLATE_HEADERS_NORMALIZED = TEMPLATE_HEADERS.map(normalizeHeader)
-const MAX_VIDEO_BYTES = 64 * 1024 * 1024
-
-function validateTemplateHeaders(headerRow: unknown[]) {
-  const normalized = headerRow
-    .map((value) => normalizeHeader(String(value ?? "")))
-    .filter(Boolean)
-  if (normalized.length !== TEMPLATE_HEADERS_NORMALIZED.length) return false
-  return normalized.every((value, index) => value === TEMPLATE_HEADERS_NORMALIZED[index])
-}
-
-function normalizeRowKeys(row: Record<string, unknown>) {
-  const normalized: Record<string, unknown> = {}
-  Object.entries(row).forEach(([key, value]) => {
-    normalized[normalizeHeader(key)] = value
-  })
-  return normalized
-}
-
-function findFirstErrorMessage(errors: Record<string, unknown>): string | null {
-  for (const value of Object.values(errors)) {
-    if (!value) continue
-    if (typeof value === "object" && "message" in (value as Record<string, unknown>)) {
-      const message = (value as { message?: string }).message
-      if (typeof message === "string" && message) return message
-    }
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (item && typeof item === "object" && "message" in item) {
-          const msg = (item as { message?: string }).message
-          if (typeof msg === "string" && msg) return msg
-        }
-        if (item && typeof item === "object") {
-          const nested = findFirstErrorMessage(item as Record<string, unknown>)
-          if (nested) return nested
-        }
-      }
-    } else if (typeof value === "object") {
-      const nested = findFirstErrorMessage(value as Record<string, unknown>)
-      if (nested) return nested
-    }
-  }
+function inferMediaTypeFromUrl(url?: string | null) {
+  if (!url) return null
+  const clean = url.split("?")[0]
+  const ext = clean.split(".").pop()?.toLowerCase()
+  if (!ext) return null
+  if (["mp4", "mov", "webm", "m4v"].includes(ext)) return "video"
+  if (["mp3", "wav", "ogg", "m4a", "aac"].includes(ext)) return "audio"
+  if (["jpg", "jpeg", "png", "gif", "webp"].includes(ext)) return "image"
+  if (["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"].includes(ext)) return "document"
   return null
-}
-
-function parseTags(value?: string) {
-  if (!value) return undefined
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
-
-function mapImportRows(rows: Record<string, unknown>[]) {
-  return rows
-    .map((row) => normalizeRowKeys(row))
-    .map((row) => {
-      const whatsapp = String(row.telefone ?? "").trim()
-      if (!whatsapp) return null
-
-      const full_name = String(row.nome ?? "").trim()
-      const first_name = full_name ? full_name.split(" ")[0] : undefined
-      const email = String(row.email ?? "").trim() || undefined
-      const city = String(row.cidade ?? "").trim() || undefined
-      const state = String(row.estado ?? "").trim() || undefined
-      const tags = parseTags(String(row.tags ?? "").trim())
-      const bairro = String(row.bairro ?? "").trim() || undefined
-      const cep = String(row.cep ?? "").trim() || undefined
-      const rua = String(row.rua ?? "").trim() || undefined
-      const numero_residencia = String(row.numero_residencia ?? "").trim() || undefined
-      const complemento = String(row.complemento ?? "").trim() || undefined
-      const ponto_referencia = String(row.ponto_referencia ?? "").trim() || undefined
-      const genero = String(row.genero ?? "").trim() || undefined
-      const data_nascimento = String(row.data_nascimento ?? "").trim() || undefined
-
-      const custom_fields: Record<string, unknown> = {}
-      const customKeys = [
-        "data_nascimento",
-        "genero",
-        "bairro",
-        "cep",
-        "rua",
-        "numero_residencia",
-        "complemento",
-        "ponto_referencia"
-      ]
-
-      customKeys.forEach((key) => {
-        const value = row[key]
-        if (value !== undefined && value !== null && String(value).trim() !== "") {
-          custom_fields[key] = value
-        }
-      })
-
-      return {
-        whatsapp,
-        first_name,
-        full_name,
-        email,
-        city,
-        state,
-        bairro,
-        cep,
-        rua,
-        numero_residencia,
-        complemento,
-        ponto_referencia,
-        genero,
-        data_nascimento,
-        tags,
-        custom_fields: Object.keys(custom_fields).length ? custom_fields : undefined
-      }
-    })
-    .filter(Boolean)
 }
 
 export function CampaignForm({
   initialData,
+  initialImportedContacts,
   onSubmit,
   mode = "create",
   isSubmitting,
-  submitError
+  submitError,
+  allowPublishFromDraft
 }: CampaignFormProps) {
-  const resolvedInitial = useMemo(
-    () =>
-      initialData
-        ? {
-            ...defaultValues,
-            ...initialData,
-            timezone: DEFAULT_TIMEZONE,
-            media_type: initialData.link_preview
-              ? "link"
-              : initialData.media_type ?? "none"
-          }
-        : defaultValues,
-    [initialData]
-  )
+  const resolvedInitial = useMemo(() => {
+  if (!initialData) return defaultValues
+  const rawMediaType = initialData.media_type ?? "none"
+  const inferred = inferMediaTypeFromUrl(initialData.media_url ?? null)
+  const normalizedMediaType =
+    rawMediaType && rawMediaType !== "text"
+      ? rawMediaType
+      : initialData.link_preview
+        ? "link"
+        : inferred ?? "none"
 
+  return {
+    ...defaultValues,
+    ...initialData,
+    message_body: initialData.message_body ?? "",
+    timezone: DEFAULT_TIMEZONE,
+    media_type: normalizedMediaType
+  }
+}, [initialData])
   const form = useForm<CampaignFormValues>({
     resolver: zodResolver(campaignFormSchema),
-    defaultValues: resolvedInitial
+    defaultValues: resolvedInitial,
+    shouldUnregister: true
   })
 
   const hasInitializedRef = useRef(false)
@@ -347,11 +134,18 @@ export function CampaignForm({
   const submitActionRef = useRef<"publish" | "draft" | "keep">("publish")
   const mediaInputRef = useRef<HTMLInputElement | null>(null)
   const initialSchedule = splitDateTimeInTimeZone(initialData?.scheduled_at ?? null)
-  const [scheduleMode, setScheduleMode] = useState<"now" | "schedule">(
-    initialData?.scheduled_at ? "schedule" : "now"
+  const initialScheduleExpired = Boolean(
+    initialData?.scheduled_at && new Date(initialData.scheduled_at).getTime() <= Date.now()
   )
-  const [scheduleDate, setScheduleDate] = useState(initialSchedule.date)
-  const [scheduleTime, setScheduleTime] = useState(initialSchedule.time)
+  const [scheduleMode, setScheduleMode] = useState<"now" | "schedule">(
+    initialScheduleExpired ? "now" : initialData?.scheduled_at ? "schedule" : "now"
+  )
+  const [scheduleDate, setScheduleDate] = useState(
+    initialScheduleExpired ? "" : initialSchedule.date
+  )
+  const [scheduleTime, setScheduleTime] = useState(
+    initialScheduleExpired ? "" : initialSchedule.time
+  )
   const scheduleSyncRef = useRef(false)
   const [audienceMode, setAudienceMode] = useState<"all" | "file">(
     initialData?.audience_source ?? "all"
@@ -363,22 +157,23 @@ export function CampaignForm({
     inserted: number
     ignored: number
   } | null>(null)
-  const [importedContacts, setImportedContacts] = useState<
-    Array<{ id: string; whatsapp_e164: string; first_name?: string | null; full_name?: string | null }>
-  >([])
+  const [importedContacts, setImportedContacts] = useState<AudienceContact[]>([])
   const [defaultDdd, setDefaultDdd] = useState("47")
-  const [linkPreviewData, setLinkPreviewData] = useState<{
-    url: string
-    title?: string
-    description?: string
-    image?: string
-    siteName?: string
-  } | null>(null)
-  const lastPreviewRef = useRef<string | null>(null)
 
-  const { fields, append, remove, move } = useFieldArray({
+  const handleRemoveImportedContact = (contactId: string) => {
+    const next = importedContacts.filter((contact) => contact.id !== contactId)
+    setImportedContacts(next)
+    form.setValue(
+      "audience_contact_ids",
+      next.map((contact) => contact.id),
+      { shouldDirty: true, shouldValidate: true }
+    )
+  }
+
+  const { fields, append, remove, move, replace } = useFieldArray({
     control: form.control,
-    name: "variants"
+    name: "variants",
+    keyName: "fieldId"
   })
 
   const watchedInstanceId = form.watch("instance_id")
@@ -386,25 +181,41 @@ export function CampaignForm({
   const [debouncedCitySearch, setDebouncedCitySearch] = useState("")
   const lastInstanceRef = useRef<string | null>(null)
 
-  const { data: instances } = useQuery({
+  const { data: instancesResponse } = useQuery({
     queryKey: ["instances"],
     queryFn: () => fetchInstances()
   })
 
+  const allInstances = useMemo(() => instancesResponse?.data ?? [], [instancesResponse?.data])
+  const connectedInstances = useMemo(
+    () => allInstances.filter((instance) => isInstanceConnected(instance.conexao_w)),
+    [allInstances]
+  )
+  const selectableInstances = useMemo(() => {
+    if (mode === "create") return connectedInstances
+    return allInstances
+  }, [allInstances, connectedInstances, mode])
   const watchValues = form.watch()
   const watchRandomizer = watchValues.use_randomizer
   const messageBody = watchValues.message_body ?? ""
   const mediaUrl = watchValues.media_url
-  const mediaType = watchValues.media_type
+  const mediaType =
+    form.watch("media_type", resolvedInitial.media_type ?? "none") ??
+    resolvedInitial.media_type ??
+    "none"
   const linkPreview = watchValues.link_preview
-  const typingDelay = watchValues.typing_delay_seconds ?? 0
   const isAudio = mediaType === "audio"
+  const { data: linkPreviewData } = useLinkPreview({
+    text: messageBody ?? "",
+    enabled: linkPreview || mediaType === "link"
+  })
   const [isUploading, setIsUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const busy = isSubmitting ?? form.formState.isSubmitting
   const scheduleEnabled = scheduleMode === "schedule"
   const currentStatus = resolvedInitial.status ?? "draft"
-  const canPublishFromDraft = mode === "edit" && currentStatus === "draft"
+  const canPublishFromDraft =
+    mode === "edit" && (allowPublishFromDraft ?? currentStatus === "draft")
   const audienceTags = watchValues.audience_tags ?? []
   const audienceTagsExclude = watchValues.audience_tags_exclude ?? []
   const audienceCities = watchValues.audience_cities ?? []
@@ -415,7 +226,7 @@ export function CampaignForm({
   const selectedRua = audienceRuas[0] ?? ""
 
   const {
-    data: contactFilterOptions,
+    data: contactFilterResponse,
     isLoading: isFilterOptionsLoading
   } = useQuery({
     queryKey: [
@@ -434,7 +245,7 @@ export function CampaignForm({
     enabled: audienceMode === "all" && Boolean(watchedInstanceId)
   })
 
-  const filterOptions = contactFilterOptions ?? {
+  const filterOptions = contactFilterResponse?.data ?? {
     tags: [],
     cities: [],
     bairros: [],
@@ -531,15 +342,30 @@ export function CampaignForm({
     if (!initialData) return
     if (!hasInitializedRef.current || !form.formState.isDirty) {
       form.reset(resolvedInitial)
+      replace(resolvedInitial.variants ?? [])
       const schedule = splitDateTimeInTimeZone(initialData.scheduled_at ?? null)
-      setScheduleMode(initialData.scheduled_at ? "schedule" : "now")
-      setScheduleDate(schedule.date)
-      setScheduleTime(schedule.time)
+      const scheduleExpired = Boolean(
+        initialData.scheduled_at && new Date(initialData.scheduled_at).getTime() <= Date.now()
+      )
+      setScheduleMode(scheduleExpired ? "now" : initialData.scheduled_at ? "schedule" : "now")
+      setScheduleDate(scheduleExpired ? "" : schedule.date)
+      setScheduleTime(scheduleExpired ? "" : schedule.time)
       scheduleSyncRef.current = true
       setAudienceMode(initialData.audience_source ?? "all")
+      if (initialImportedContacts && initialImportedContacts.length) {
+        setImportedContacts(initialImportedContacts)
+        form.setValue(
+          "audience_contact_ids",
+          initialImportedContacts.map((contact) => contact.id),
+          { shouldDirty: false, shouldValidate: false }
+        )
+        setAudienceMode("file")
+      } else {
+        setImportedContacts([])
+      }
       hasInitializedRef.current = true
     }
-  }, [initialData, resolvedInitial, form])
+  }, [initialData, initialImportedContacts, resolvedInitial, form, replace])
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -568,6 +394,19 @@ export function CampaignForm({
 
     lastInstanceRef.current = watchedInstanceId
   }, [watchedInstanceId, form])
+
+  useEffect(() => {
+    if (mode !== "create") return
+    if (!watchedInstanceId) return
+    const allowed = connectedInstances.some((instance) => instance.id === watchedInstanceId)
+    if (!allowed) {
+      form.setValue("instance_id", "", { shouldDirty: true, shouldValidate: true })
+      form.setError("instance_id", {
+        type: "manual",
+        message: "Selecione uma instância conectada."
+      })
+    }
+  }, [mode, watchedInstanceId, connectedInstances, form])
   const firstFormError = useMemo(
     () => findFirstErrorMessage(form.formState.errors as Record<string, unknown>),
     [form.formState.errors]
@@ -611,20 +450,7 @@ export function CampaignForm({
     }
   }, [audienceMode, form])
 
-  const acceptTypes = useMemo(() => {
-    switch (mediaType) {
-      case "image":
-        return "image/*"
-      case "video":
-        return "video/*"
-      case "audio":
-        return "audio/*"
-      case "document":
-        return "*/*"
-      default:
-        return ""
-    }
-  }, [mediaType])
+  const acceptTypes = getAcceptTypes(mediaType)
 
   useEffect(() => {
     if ((mediaType === "none" || mediaType === "link") && mediaUrl) {
@@ -661,49 +487,6 @@ export function CampaignForm({
     }
   }, [watchValues.use_composing, watchValues.typing_delay_seconds, form])
 
-  const linkUrl = useMemo(() => {
-    if (!linkPreview && mediaType !== "link") return null
-    const text = messageBody ?? ""
-    const match = text.match(/https?:\/\/\S+/i)
-    return match?.[0] ?? null
-  }, [linkPreview, mediaType, messageBody])
-
-  useEffect(() => {
-    if (!linkUrl) {
-      setLinkPreviewData(null)
-      lastPreviewRef.current = null
-      return
-    }
-    if (lastPreviewRef.current === linkUrl) {
-      return
-    }
-    lastPreviewRef.current = linkUrl
-
-    const controller = new AbortController()
-    const timeout = setTimeout(() => {
-      fetch(`/api/link-preview?url=${encodeURIComponent(linkUrl)}`, {
-        signal: controller.signal
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          setLinkPreviewData({
-            url: linkUrl,
-            title: data.title,
-            description: data.description,
-            image: data.image,
-            siteName: data.siteName
-          })
-        })
-        .catch(() => {
-          setLinkPreviewData({ url: linkUrl })
-        })
-    }, 200)
-
-    return () => {
-      clearTimeout(timeout)
-      controller.abort()
-    }
-  }, [linkUrl])
 
   const handleImportFile = async (file: File) => {
     setImporting(true)
@@ -714,37 +497,24 @@ export function CampaignForm({
         throw new Error("Selecione uma instância antes de importar.")
       }
 
-      const buffer = await file.arrayBuffer()
-      const workbook = XLSX.read(buffer, { type: "array" })
-      const sheetName = workbook.SheetNames[0]
-      const sheet = workbook.Sheets[sheetName]
-      const headerRows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, range: 0 })
-      const headerRow = headerRows[0] as unknown[] | undefined
-      if (!headerRow || !validateTemplateHeaders(headerRow)) {
-        throw new Error(
-          "Arquivo inválido. Use exatamente o template padrão disponibilizado."
-        )
-      }
-      const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
-        defval: ""
-      })
-      const mappedRows = mapImportRows(rawRows)
-      const totalRows = rawRows.length
-      if (mappedRows.length === 0) {
+      const parsed = await parseContactsTemplate(file)
+      const totalRows = parsed.totalRows
+      if (parsed.rows.length === 0) {
         throw new Error("Nenhum número válido encontrado no arquivo.")
       }
 
-      const result = await importContacts(mappedRows, instanceId, defaultDdd)
+      const result = await importContacts(parsed.rows, instanceId, defaultDdd)
+      const payload = result.data
       setImportSummary({
         total: totalRows,
-        inserted: result.inserted,
-        ignored: result.ignored + Math.max(0, totalRows - mappedRows.length)
+        inserted: payload.inserted,
+        ignored: payload.ignored + Math.max(0, totalRows - parsed.rows.length)
       })
-      setImportedContacts(result.contacts)
+      setImportedContacts(payload.contacts)
       setAudienceMode("file")
       form.setValue(
         "audience_contact_ids",
-        result.contacts.map((contact) => contact.id),
+        payload.contacts.map((contact) => contact.id),
         { shouldDirty: true, shouldValidate: false }
       )
     } catch (error) {
@@ -755,26 +525,61 @@ export function CampaignForm({
     }
   }
 
+  const handleMediaTypeChange = (value: string) => {
+    form.setValue("media_type", value, {
+      shouldDirty: true,
+      shouldValidate: true
+    })
+    if (value !== "none" && value !== "link") {
+      setTimeout(() => mediaInputRef.current?.click(), 0)
+    }
+  }
+
+  const handleFileSelected = async (file: File) => {
+    if (mediaType === "video" && file.size > MAX_VIDEO_BYTES) {
+      setUploadError("Vídeo acima de 64 MB. Envie um arquivo menor.")
+      return
+    }
+    setIsUploading(true)
+    setUploadError(null)
+    try {
+      const result = await uploadMedia(file, "campaigns")
+      form.setValue("media_url", result.url, {
+        shouldDirty: true,
+        shouldValidate: true
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erro ao enviar mídia"
+      setUploadError(message)
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  const handleRemoveMedia = () => {
+    form.setValue("media_url", "", {
+      shouldDirty: true,
+      shouldValidate: true
+    })
+    setUploadError(null)
+    if (mediaInputRef.current) {
+      mediaInputRef.current.value = ""
+    }
+  }
   const scheduledIso = scheduleEnabled
     ? dateTimeInTimeZoneToUtcIso(scheduleDate, scheduleTime)
     : null
 
   const summary = {
     title: watchValues.title,
-    instance: instances?.find((inst) => inst.id === watchValues.instance_id)?.name ?? "-",
-    scheduled: scheduledIso ? formatDateTimeInTimeZone(scheduledIso) : "Sem agendamento",
-    delay: `${watchValues.delay_min_seconds ?? 0}s - ${watchValues.delay_max_seconds ?? 0}s`,
+    instanceName:
+      allInstances.find((inst) => inst.id === watchValues.instance_id)?.name ?? "-",
+    scheduledLabel: scheduledIso
+      ? formatDateTimeInTimeZone(scheduledIso)
+      : "Sem agendamento",
+    delayLabel: `${watchValues.delay_min_seconds ?? 0}s - ${watchValues.delay_max_seconds ?? 0}s`,
     useRandomizer: watchValues.use_randomizer
   }
-
-  const contentOptions = [
-    { value: "none", label: "Texto", icon: MessageSquare },
-    { value: "link", label: "Link", icon: Link2 },
-    { value: "image", label: "Imagem", icon: ImageIcon },
-    { value: "audio", label: "Áudio", icon: Mic },
-    { value: "video", label: "Vídeo", icon: Video },
-    { value: "document", label: "Documento", icon: FileText }
-  ]
 
   const audienceError = form.formState.errors.audience_contact_ids?.message
 
@@ -783,12 +588,7 @@ export function CampaignForm({
       <form
         className="grid gap-6 lg:grid-cols-[2fr_1fr]"
         onSubmit={form.handleSubmit(async (values) => {
-          const payload: CampaignFormValues = { ...values }
-          const shouldSchedule = scheduleEnabled && Boolean(scheduledIso)
-
-          payload.timezone = DEFAULT_TIMEZONE
-          payload.scheduled_at = scheduleEnabled ? scheduledIso : null
-
+          const normalized = normalizeCampaignFormValues(values)
           if (scheduleEnabled && !scheduledIso) {
             form.setError("scheduled_at", {
               type: "manual",
@@ -797,7 +597,7 @@ export function CampaignForm({
             return
           }
 
-          if (audienceMode === "file" && (payload.audience_contact_ids ?? []).length === 0) {
+          if (audienceMode === "file" && (normalized.audience_contact_ids ?? []).length === 0) {
             form.setError("audience_contact_ids", {
               type: "manual",
               message: "Importe a planilha para selecionar os contatos"
@@ -805,27 +605,19 @@ export function CampaignForm({
             return
           }
 
-          if (mode === "create") {
-            if (submitActionRef.current === "draft") {
-              payload.status = "draft"
-              payload.scheduled_at = null
-            } else {
-              payload.status = shouldSchedule ? "scheduled" : "processing"
-              if (!shouldSchedule) {
-                payload.scheduled_at = null
-              }
-            }
-          }
+          const payload = applySubmitIntent(normalized, {
+            intent: submitActionRef.current,
+            mode,
+            scheduleEnabled,
+            scheduledIso
+          })
 
-          if (mode === "edit") {
-            if (submitActionRef.current === "draft") {
-              payload.status = "draft"
+          if (payload.status === "scheduled") {
+            const target = scheduleEnabled ? scheduledIso : null
+            const isPast = target ? new Date(target).getTime() <= Date.now() : !scheduleEnabled
+            if (isPast) {
+              payload.status = "processing"
               payload.scheduled_at = null
-            } else if (submitActionRef.current === "publish") {
-              payload.status = shouldSchedule ? "scheduled" : "processing"
-              if (!shouldSchedule) {
-                payload.scheduled_at = null
-              }
             }
           }
 
@@ -844,981 +636,85 @@ export function CampaignForm({
               {firstFormError}
             </div>
           ) : null}
-          <Card>
-            <div className="space-y-4">
-              <div>
-                <h2 className="font-display text-lg font-semibold">Dados da campanha</h2>
-                <p className="text-sm text-muted-foreground">
-                  Informações gerais da campanha e agendamento.
-                </p>
-              </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <FormField
-                  control={form.control}
-                  name="title"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Título</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Campanha de reativação" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="instance_id"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Instância</FormLabel>
-                      <Select value={field.value} onValueChange={field.onChange}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecione" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {instances?.map((instance) => (
-                            <SelectItem key={instance.id} value={instance.id}>
-                              {instance.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
+          <CampaignBasicsSection
+            instances={selectableInstances}
+            scheduleMode={scheduleMode}
+            onScheduleModeChange={setScheduleMode}
+            scheduleEnabled={scheduleEnabled}
+            scheduleDate={scheduleDate}
+            scheduleTime={scheduleTime}
+            onScheduleDateChange={setScheduleDate}
+            onScheduleTimeChange={setScheduleTime}
+            timezonePlaceholder={DEFAULT_TIMEZONE}
+          />
 
-              <FormField
-                control={form.control}
-                name="description"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Descrição</FormLabel>
-                    <FormControl>
-                      <Textarea placeholder="Contexto e objetivo da campanha" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+          <CampaignAudienceSection
+            audienceMode={audienceMode}
+            onAudienceModeChange={setAudienceMode}
+            watchedInstanceId={watchedInstanceId}
+            isFilterOptionsLoading={isFilterOptionsLoading}
+            filterOptions={filterOptions}
+            tagIncludeOptions={tagIncludeOptions}
+            tagExcludeOptions={tagExcludeOptions}
+            audienceTags={audienceTags}
+            audienceTagsExclude={audienceTagsExclude}
+            citySearch={citySearch}
+            onCitySearchChange={setCitySearch}
+            debouncedCitySearch={debouncedCitySearch}
+            selectedCity={selectedCity}
+            selectedBairro={selectedBairro}
+            selectedRua={selectedRua}
+            onClearField={clearArrayValue}
+            onToggleField={toggleArrayValue}
+            onCitySelect={setCitySelection}
+            onBairroSelect={setBairroSelection}
+            onRuaSelect={setRuaSelection}
+            defaultDdd={defaultDdd}
+            onDefaultDddChange={setDefaultDdd}
+            onImportFile={handleImportFile}
+            importing={importing}
+            importError={importError}
+            importSummary={importSummary}
+            importedContacts={importedContacts}
+            onRemoveContact={handleRemoveImportedContact}
+            audienceError={audienceError ? String(audienceError) : null}
+          />
 
-              <div className="space-y-4">
-                <div className="grid gap-3 md:grid-cols-2">
-                  <button
-                    type="button"
-                    className={cn(
-                      "rounded-xl border p-4 text-left transition",
-                      scheduleMode === "now"
-                        ? "border-primary bg-primary/5"
-                        : "border-muted-foreground/20 hover:border-muted-foreground/40"
-                    )}
-                    onClick={() => setScheduleMode("now")}
-                  >
-                    <p className="text-sm font-semibold">Enviar agora</p>
-                    <p className="text-xs text-muted-foreground">
-                      Disparo imediato após salvar.
-                    </p>
-                  </button>
-                  <button
-                    type="button"
-                    className={cn(
-                      "rounded-xl border p-4 text-left transition",
-                      scheduleMode === "schedule"
-                        ? "border-primary bg-primary/5"
-                        : "border-muted-foreground/20 hover:border-muted-foreground/40"
-                    )}
-                    onClick={() => setScheduleMode("schedule")}
-                  >
-                    <p className="text-sm font-semibold">Agendar</p>
-                    <p className="text-xs text-muted-foreground">Defina data e hora.</p>
-                  </button>
-                </div>
+          <CampaignContentSection
+            mediaType={mediaType ?? "none"}
+            isAudio={isAudio}
+            mediaInputRef={mediaInputRef}
+            acceptTypes={acceptTypes}
+            isUploading={isUploading}
+            uploadError={uploadError}
+            onMediaTypeChange={handleMediaTypeChange}
+            onFileSelected={handleFileSelected}
+            onRemoveMedia={handleRemoveMedia}
+          />
 
-                {scheduleEnabled ? (
-                  <div className="grid gap-4 md:grid-cols-3">
-                    <FormItem>
-                      <FormLabel>Dia</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="date"
-                          value={scheduleDate}
-                          onChange={(event) => setScheduleDate(event.target.value)}
-                        />
-                      </FormControl>
-                    </FormItem>
-                    <FormItem>
-                      <FormLabel>Horário</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="time"
-                          value={scheduleTime}
-                          onChange={(event) => setScheduleTime(event.target.value)}
-                        />
-                      </FormControl>
-                    </FormItem>
-                    <FormField
-                      control={form.control}
-                      name="timezone"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Fuso horário</FormLabel>
-                          <FormControl>
-                            <Input
-                              placeholder={DEFAULT_TIMEZONE}
-                              readOnly
-                              {...field}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </Card>
+          <CampaignDeliverySection showTypingDelay={watchValues.use_composing} />
 
-          <Card>
-            <div className="space-y-4">
-              <div>
-                <h2 className="font-display text-lg font-semibold">Público alvo</h2>
-                <p className="text-sm text-muted-foreground">
-                  Selecione todos os contatos ou importe uma planilha e use apenas quem foi
-                  carregado.
-                </p>
-              </div>
+          <CampaignRandomizerSection
+            fields={fields}
+            append={append}
+            remove={remove}
+            move={move}
+            watchRandomizer={watchRandomizer}
+            isAudio={isAudio}
+            variantError={form.formState.errors.variants?.message ? String(form.formState.errors.variants.message) : null}
+          />
 
-              <div className="grid gap-3 md:grid-cols-2">
-                <button
-                  type="button"
-                  className={cn(
-                    "rounded-xl border p-4 text-left transition",
-                    audienceMode === "all"
-                      ? "border-primary bg-primary/5"
-                      : "border-muted-foreground/20 hover:border-muted-foreground/40"
-                  )}
-                  onClick={() => setAudienceMode("all")}
-                >
-                  <div className="flex items-center gap-2">
-                    <Users className="h-4 w-4" />
-                    <p className="text-sm font-semibold">Todos os contatos</p>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Disparar para toda a base.
-                  </p>
-                </button>
-                <button
-                  type="button"
-                  className={cn(
-                    "rounded-xl border p-4 text-left transition",
-                    audienceMode === "file"
-                      ? "border-primary bg-primary/5"
-                      : "border-muted-foreground/20 hover:border-muted-foreground/40"
-                  )}
-                  onClick={() => setAudienceMode("file")}
-                >
-                  <div className="flex items-center gap-2">
-                    <Upload className="h-4 w-4" />
-                    <p className="text-sm font-semibold">Importar planilha</p>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    XLSX ou CSV com coluna de WhatsApp.
-                  </p>
-                </button>
-              </div>
-
-              {audienceMode === "all" ? (
-                <div className="space-y-4">
-                  <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
-                    Selecione filtros para segmentar a base. Sem filtros, a campanha
-                    será enviada para todos os contatos válidos da instância.
-                  </div>
-
-                  {!watchedInstanceId ? (
-                    <p className="text-sm text-muted-foreground">
-                      Selecione uma instância para carregar os filtros disponíveis.
-                    </p>
-                  ) : isFilterOptionsLoading ? (
-                    <p className="text-sm text-muted-foreground">Carregando filtros...</p>
-                  ) : (
-                    <>
-                      <div className="grid gap-4 lg:grid-cols-2">
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm font-semibold">Tags incluídas</p>
-                            {audienceTags.length > 0 ? (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => clearArrayValue("audience_tags")}
-                              >
-                                Limpar
-                              </Button>
-                            ) : null}
-                          </div>
-                          {tagIncludeOptions.length === 0 ? (
-                            <p className="text-xs text-muted-foreground">
-                              Nenhuma tag cadastrada.
-                            </p>
-                          ) : (
-                            <div className="flex flex-wrap gap-2">
-                              {tagIncludeOptions.map((tag) => (
-                                <button
-                                  key={`tag-${tag}`}
-                                  type="button"
-                                  className="focus:outline-none"
-                                  onClick={() => toggleArrayValue("audience_tags", tag)}
-                                >
-                                  <Badge
-                                    variant={audienceTags.includes(tag) ? "default" : "secondary"}
-                                  >
-                                    {tag}
-                                  </Badge>
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm font-semibold">Tags excluídas</p>
-                            {audienceTagsExclude.length > 0 ? (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => clearArrayValue("audience_tags_exclude")}
-                              >
-                                Limpar
-                              </Button>
-                            ) : null}
-                          </div>
-                          {tagExcludeOptions.length === 0 ? (
-                            <p className="text-xs text-muted-foreground">
-                              Nenhuma tag cadastrada.
-                            </p>
-                          ) : (
-                            <div className="flex flex-wrap gap-2">
-                              {tagExcludeOptions.map((tag) => (
-                                <button
-                                  key={`tag-exclude-${tag}`}
-                                  type="button"
-                                  className="focus:outline-none"
-                                  onClick={() => toggleArrayValue("audience_tags_exclude", tag)}
-                                >
-                                  <Badge
-                                    variant={
-                                      audienceTagsExclude.includes(tag) ? "destructive" : "secondary"
-                                    }
-                                  >
-                                    {tag}
-                                  </Badge>
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="grid gap-4 lg:grid-cols-3">
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm font-semibold">Cidades</p>
-                            {selectedCity ? (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setCitySelection("")}
-                              >
-                                Limpar
-                              </Button>
-                            ) : null}
-                          </div>
-                          <Input
-                            placeholder="Buscar cidade..."
-                            value={citySearch}
-                            onChange={(event) => setCitySearch(event.target.value)}
-                            className="h-9"
-                          />
-                          {selectedCity ? (
-                            <p className="text-xs text-muted-foreground">
-                              Cidade selecionada: <span className="font-medium">{selectedCity}</span>
-                            </p>
-                          ) : null}
-                          <ScrollArea className="h-40 rounded-lg border bg-muted/30 p-3">
-                            {filterOptions.cities.length === 0 ? (
-                              <p className="text-xs text-muted-foreground">
-                                {debouncedCitySearch
-                                  ? "Nenhuma cidade encontrada."
-                                  : "Nenhuma cidade cadastrada."}
-                              </p>
-                            ) : (
-                              <div className="space-y-2">
-                                <label className="flex items-center gap-2 text-sm">
-                                  <Checkbox
-                                    checked={!selectedCity}
-                                    onCheckedChange={() => setCitySelection("")}
-                                  />
-                                  <span>Todas as cidades</span>
-                                </label>
-                                {filterOptions.cities.map((city) => (
-                                  <label key={city} className="flex items-center gap-2 text-sm">
-                                    <Checkbox
-                                      checked={selectedCity === city}
-                                      onCheckedChange={() => setCitySelection(city)}
-                                    />
-                                    <span>{city}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            )}
-                          </ScrollArea>
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm font-semibold">Bairros</p>
-                            {selectedBairro ? (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setBairroSelection("")}
-                              >
-                                Limpar
-                              </Button>
-                            ) : null}
-                          </div>
-                          <ScrollArea className="h-40 rounded-lg border bg-muted/30 p-3">
-                            {!selectedCity ? (
-                              <p className="text-xs text-muted-foreground">
-                                Selecione uma cidade para listar os bairros.
-                              </p>
-                            ) : filterOptions.bairros.length === 0 ? (
-                              <p className="text-xs text-muted-foreground">
-                                Nenhum bairro cadastrado para a cidade selecionada.
-                              </p>
-                            ) : (
-                              <div className="space-y-2">
-                                <label className="flex items-center gap-2 text-sm">
-                                  <Checkbox
-                                    checked={!selectedBairro}
-                                    onCheckedChange={() => setBairroSelection("")}
-                                  />
-                                  <span>Todos os bairros</span>
-                                </label>
-                                {filterOptions.bairros.map((bairro) => (
-                                  <label key={bairro} className="flex items-center gap-2 text-sm">
-                                    <Checkbox
-                                      checked={selectedBairro === bairro}
-                                      onCheckedChange={() => setBairroSelection(bairro)}
-                                    />
-                                    <span>{bairro}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            )}
-                          </ScrollArea>
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm font-semibold">Ruas</p>
-                            {selectedRua ? (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setRuaSelection("")}
-                              >
-                                Limpar
-                              </Button>
-                            ) : null}
-                          </div>
-                          <ScrollArea className="h-40 rounded-lg border bg-muted/30 p-3">
-                            {!selectedCity ? (
-                              <p className="text-xs text-muted-foreground">
-                                Selecione uma cidade para listar as ruas.
-                              </p>
-                            ) : !selectedBairro ? (
-                              <p className="text-xs text-muted-foreground">
-                                Selecione um bairro para listar as ruas.
-                              </p>
-                            ) : filterOptions.ruas.length === 0 ? (
-                              <p className="text-xs text-muted-foreground">
-                                Nenhuma rua cadastrada para o bairro selecionado.
-                              </p>
-                            ) : (
-                              <div className="space-y-2">
-                                <label className="flex items-center gap-2 text-sm">
-                                  <Checkbox
-                                    checked={!selectedRua}
-                                    onCheckedChange={() => setRuaSelection("")}
-                                  />
-                                  <span>Todas as ruas</span>
-                                </label>
-                                {filterOptions.ruas.map((rua) => (
-                                  <label key={rua} className="flex items-center gap-2 text-sm">
-                                    <Checkbox
-                                      checked={selectedRua === rua}
-                                      onCheckedChange={() => setRuaSelection(rua)}
-                                    />
-                                    <span>{rua}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            )}
-                          </ScrollArea>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              ) : null}
-
-              {audienceMode === "file" ? (
-                <div className="space-y-3">
-                  <div className="grid gap-4 md:grid-cols-3">
-                    <FormItem>
-                      <FormLabel>DDD padrão</FormLabel>
-                      <FormControl>
-                        <Input
-                          value={defaultDdd}
-                          onChange={(event) => setDefaultDdd(event.target.value)}
-                          placeholder="47"
-                        />
-                      </FormControl>
-                    </FormItem>
-                    <FormItem className="md:col-span-2">
-                      <FormLabel>Arquivo de contatos</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="file"
-                          accept=".xlsx,.xls,.csv"
-                          disabled={importing}
-                          onChange={(event) => {
-                            const file = event.target.files?.[0]
-                            if (!file) return
-                            handleImportFile(file)
-                          }}
-                        />
-                      </FormControl>
-                    </FormItem>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
-                    <span>
-                      Use somente o template padrão. Tags devem ser separadas por vírgula.
-                    </span>
-                    <Button asChild variant="link" size="sm">
-                      <a href="/templates/cidadaos_import_template.xlsx" download>
-                        Baixar template
-                      </a>
-                    </Button>
-                  </div>
-
-                  {importing ? (
-                    <p className="text-sm text-muted-foreground">Importando contatos...</p>
-                  ) : null}
-
-                  {importError ? (
-                    <p className="text-sm text-destructive">{importError}</p>
-                  ) : null}
-
-                  {audienceError ? (
-                    <p className="text-sm text-destructive">{audienceError}</p>
-                  ) : null}
-
-                  {importSummary ? (
-                    <div className="rounded-lg border bg-muted/30 p-3 text-sm">
-                      <p>
-                        Contatos processados: {importSummary.total} | Importados:{" "}
-                        {importSummary.inserted} | Ignorados: {importSummary.ignored}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        Selecionados automaticamente: {importedContacts.length}
-                      </p>
-                    </div>
-                  ) : null}
-
-                  {importedContacts.length > 0 ? (
-                    <div className="rounded-lg border bg-background p-3 text-sm">
-                      <p className="mb-2 text-xs text-muted-foreground">
-                        Primeiros contatos importados
-                      </p>
-                      <div className="space-y-1">
-                        {importedContacts.slice(0, 5).map((contact) => (
-                          <div key={contact.id} className="flex justify-between text-xs">
-                            <span>
-                              {contact.full_name ?? contact.first_name ?? "Contato"}
-                            </span>
-                            <span className="text-muted-foreground">
-                              {contact.whatsapp_e164}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          </Card>
-
-          <Card>
-            <div className="space-y-4">
-              <div>
-                <h2 className="font-display text-lg font-semibold">Conteúdo da mensagem</h2>
-                <p className="text-sm text-muted-foreground">
-                  Configure texto principal e mídia.
-                </p>
-              </div>
-
-              <div className="space-y-4">
-                <div className="grid gap-3 md:grid-cols-5">
-                  {contentOptions.map((option) => {
-                    const Icon = option.icon
-                    const active = mediaType === option.value
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={cn(
-                          "flex flex-col items-center justify-center gap-2 rounded-xl border px-3 py-4 text-sm transition",
-                          active
-                            ? "border-primary bg-primary/5"
-                            : "border-muted-foreground/20 hover:border-muted-foreground/40"
-                        )}
-                        onClick={() => {
-                          form.setValue("media_type", option.value, {
-                            shouldDirty: true,
-                            shouldValidate: true
-                          })
-                          if (option.value !== "none" && option.value !== "link") {
-                            setTimeout(() => mediaInputRef.current?.click(), 0)
-                          }
-                        }}
-                      >
-                        <Icon className="h-5 w-5" />
-                        <span>{option.label}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-
-                {mediaType !== "none" && mediaType !== "link" ? (
-                  <>
-                    <FormItem>
-                      <FormLabel>Arquivo da mídia (Supabase)</FormLabel>
-                      <FormControl>
-                        <Input
-                          ref={mediaInputRef}
-                          type="file"
-                          accept={acceptTypes}
-                          disabled={isUploading}
-                          onChange={async (event) => {
-                            const file = event.target.files?.[0]
-                            if (!file) return
-                            if (mediaType === "video" && file.size > MAX_VIDEO_BYTES) {
-                              setUploadError(
-                                "Vídeo acima de 64 MB. Envie um arquivo menor."
-                              )
-                              event.target.value = ""
-                              return
-                            }
-                            setIsUploading(true)
-                            setUploadError(null)
-                            try {
-                              const result = await uploadMedia(file, "campaigns")
-                              form.setValue("media_url", result.url, {
-                                shouldDirty: true,
-                                shouldValidate: true
-                              })
-                            } catch (error) {
-                              const message =
-                                error instanceof Error
-                                  ? error.message
-                                  : "Erro ao enviar mídia"
-                              setUploadError(message)
-                            } finally {
-                              setIsUploading(false)
-                            }
-                          }}
-                        />
-                      </FormControl>
-                      {isUploading ? (
-                        <p className="text-xs text-muted-foreground">Enviando arquivo...</p>
-                      ) : null}
-                      {uploadError ? (
-                        <p className="text-xs text-destructive">{uploadError}</p>
-                      ) : null}
-                    </FormItem>
-
-                    <FormField
-                      control={form.control}
-                      name="media_url"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>URL da mídia</FormLabel>
-                          <FormControl>
-                            <Input placeholder="URL gerada automaticamente" readOnly {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </>
-                ) : null}
-              </div>
-
-              <FormField
-                control={form.control}
-                name="message_body"
-                render={({ field }) => (
-                  !isAudio ? (
-                    <FormItem>
-                      <FormLabel>
-                        {mediaType && mediaType !== "none" && mediaType !== "link"
-                          ? "Mensagem principal (opcional)"
-                          : "Mensagem principal"}
-                      </FormLabel>
-                      <FormControl>
-                        <WhatsAppMessageEditor
-                          value={field.value}
-                          onChange={field.onChange}
-                          placeholder="Digite a mensagem"
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  ) : (
-                    <FormItem>
-                      <FormLabel>Mensagem principal</FormLabel>
-                      <div className="rounded-lg border border-dashed bg-muted/30 p-3 text-xs text-muted-foreground">
-                        Áudio não usa texto. O envio será apenas com o arquivo de áudio.
-                      </div>
-                    </FormItem>
-                  )
-                )}
-              />
-
-            </div>
-          </Card>
-
-          <Card>
-            <div className="space-y-4">
-              <div>
-                <h2 className="font-display text-lg font-semibold">Configuração de envio</h2>
-                <p className="text-sm text-muted-foreground">
-                  Ajuste delays, batches e comportamento.
-                </p>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-4">
-                <FormField
-                  control={form.control}
-                  name="delay_min_seconds"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Delay mínimo (s)</FormLabel>
-                      <FormControl>
-                        <Input type="number" {...field} />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="delay_max_seconds"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Delay máximo (s)</FormLabel>
-                      <FormControl>
-                        <Input type="number" {...field} />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <div className="flex flex-wrap items-center gap-6">
-                <FormField
-                  control={form.control}
-                  name="readchat"
-                  render={({ field }) => (
-                    <FormItem className="flex items-center gap-2">
-                      <FormControl>
-                        <Switch checked={field.value} onCheckedChange={field.onChange} />
-                      </FormControl>
-                      <FormLabel>Marcar como lido</FormLabel>
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="use_composing"
-                  render={({ field }) => (
-                    <FormItem className="flex items-center gap-2">
-                      <FormControl>
-                        <Switch checked={field.value} onCheckedChange={field.onChange} />
-                      </FormControl>
-                      <FormLabel>Enviar "digitando"</FormLabel>
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <FormField
-                control={form.control}
-                name="batch_size"
-                render={({ field }) => (
-                  <input type="hidden" {...field} />
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="max_attempts"
-                render={({ field }) => (
-                  <input type="hidden" {...field} />
-                )}
-              />
-
-              {watchValues.use_composing ? (
-                <FormField
-                  control={form.control}
-                  name="typing_delay_seconds"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Tempo de digitando (segundos)</FormLabel>
-                      <FormControl>
-                        <div className="flex items-center gap-3">
-                          <Input
-                            type="range"
-                            min={1}
-                            max={15}
-                            step={1}
-                            value={field.value ?? 6}
-                            onChange={(event) => field.onChange(Number(event.target.value))}
-                            className="h-2"
-                          />
-                          <span className="text-sm font-medium">{field.value ?? 6}s</span>
-                        </div>
-                      </FormControl>
-                      <p className="text-xs text-muted-foreground">
-                        Controla o tempo exibindo "digitando" antes do envio.
-                      </p>
-                    </FormItem>
-                  )}
-                />
-              ) : null}
-            </div>
-          </Card>
-
-          <Card>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="font-display text-lg font-semibold">Randomizador</h2>
-                  <p className="text-sm text-muted-foreground">
-                    Crie variantes de texto e distribua por peso.
-                  </p>
-                </div>
-                <FormField
-                  control={form.control}
-                  name="use_randomizer"
-                  render={({ field }) => (
-                    <FormItem className="flex items-center gap-2">
-                      <FormControl>
-                        <Switch
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                          disabled={isAudio}
-                        />
-                      </FormControl>
-                      <FormLabel>Ativar</FormLabel>
-                    </FormItem>
-                  )}
-                />
-              </div>
-              {isAudio ? (
-                <p className="text-xs text-muted-foreground">
-                  Randomizador indisponível para áudio.
-                </p>
-              ) : null}
-              {form.formState.errors.variants?.message ? (
-                <p className="text-xs text-destructive">
-                  {String(form.formState.errors.variants.message)}
-                </p>
-              ) : null}
-
-              {watchRandomizer ? (
-                <div className="space-y-4">
-                  {fields.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      Adicione variantes para ativar o randomizador.
-                    </p>
-                  ) : null}
-
-                  <div className="space-y-3">
-                    {fields.map((field, index) => (
-                      <div key={field.id} className="rounded-xl border bg-muted/30 p-4">
-                        <div className="flex items-center justify-between gap-2">
-                          <Badge variant="secondary">Variante {index + 1}</Badge>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => move(index, index - 1)}
-                              disabled={index === 0}
-                            >
-                              <ArrowUp className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => move(index, index + 1)}
-                              disabled={index === fields.length - 1}
-                            >
-                              <ArrowDown className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => remove(index)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-
-                        <div className="mt-4 grid gap-4 md:grid-cols-3">
-                          <FormField
-                            control={form.control}
-                            name={`variants.${index}.message_body`}
-                            render={({ field }) => (
-                              <FormItem className="md:col-span-2">
-                                <FormLabel>Mensagem</FormLabel>
-                                <FormControl>
-                                  <WhatsAppMessageEditor
-                                    value={field.value}
-                                    onChange={field.onChange}
-                                    placeholder="Mensagem da variante"
-                                    rows={5}
-                                  />
-                                </FormControl>
-                              </FormItem>
-                            )}
-                          />
-                          <div className="space-y-3">
-                            <FormField
-                              control={form.control}
-                              name={`variants.${index}.weight`}
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>Peso</FormLabel>
-                                  <FormControl>
-                                    <Input
-                                      type="number"
-                                      value={field.value ?? ""}
-                                      onChange={(event) => {
-                                        const value = event.target.value
-                                        if (value === "") {
-                                          field.onChange(undefined)
-                                          return
-                                        }
-                                        const numeric = Number(value)
-                                        field.onChange(Number.isNaN(numeric) ? value : numeric)
-                                      }}
-                                    />
-                                  </FormControl>
-                                </FormItem>
-                              )}
-                            />
-                            <FormField
-                              control={form.control}
-                              name={`variants.${index}.is_active`}
-                              render={({ field }) => (
-                                <FormItem className="flex items-center gap-2">
-                                  <FormControl>
-                                    <Switch checked={field.value} onCheckedChange={field.onChange} />
-                                  </FormControl>
-                                  <FormLabel>Ativa</FormLabel>
-                                </FormItem>
-                              )}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() =>
-                      append({ message_body: "", weight: 1, is_active: true, sort_order: fields.length + 1 })
-                    }
-                  >
-                    <Plus className="mr-2 h-4 w-4" />
-                    Adicionar variante
-                  </Button>
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  O randomizador está desativado. A mensagem principal será usada em todos os envios.
-                </p>
-              )}
-            </div>
-          </Card>
-
-          <Card>
-            <div className="space-y-4">
-              <div>
-                <h2 className="font-display text-lg font-semibold">Resumo final</h2>
-                <p className="text-sm text-muted-foreground">
-                  Revise antes de salvar a campanha.
-                </p>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <p className="text-xs text-muted-foreground">Campanha</p>
-                  <p className="font-medium">{summary.title || "-"}</p>
-                  <p className="text-xs text-muted-foreground">Instância: {summary.instance}</p>
-                </div>
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <p className="text-xs text-muted-foreground">Agendamento</p>
-                  <p className="font-medium">{summary.scheduled}</p>
-                  <p className="text-xs text-muted-foreground">Fuso: {watchValues.timezone}</p>
-                </div>
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <p className="text-xs text-muted-foreground">Envio</p>
-                  <p className="font-medium">Delay {summary.delay}</p>
-                </div>
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <p className="text-xs text-muted-foreground">Randomizador</p>
-                  <p className="font-medium">{summary.useRandomizer ? "Ativo" : "Desativado"}</p>
-                  <p className="text-xs text-muted-foreground">
-                    Variantes: {formatNumber(fields.length)}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </Card>
+          <CampaignSummarySection
+            title={summary.title}
+            instanceName={summary.instanceName}
+            scheduledLabel={summary.scheduledLabel}
+            timezone={watchValues.timezone ?? DEFAULT_TIMEZONE}
+            delayLabel={summary.delayLabel}
+            useRandomizer={summary.useRandomizer}
+            variantCount={fields.length}
+          />
         </div>
-
         <div className="space-y-4">
           <WhatsAppPreview
             message={messageBody}
@@ -1845,11 +741,13 @@ export function CampaignForm({
                   onClick={() => {
                     submitActionRef.current = "draft"
                     form.handleSubmit(async (values) => {
-                      const payload: CampaignFormValues = {
-                        ...values,
-                        status: "draft",
-                        scheduled_at: null
-                      }
+                      const normalized = normalizeCampaignFormValues(values)
+                      const payload = applySubmitIntent(normalized, {
+                        intent: "draft",
+                        mode,
+                        scheduleEnabled: false,
+                        scheduledIso: null
+                      })
                       await onSubmit(payload)
                     })()
                   }}
@@ -1887,5 +785,24 @@ export function CampaignForm({
     </Form>
   )
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

@@ -22,7 +22,7 @@ export async function listCampaignAuditEvents(campaignId: string) {
     }
 
     return data as WebhookEvent[]
-  } catch (error) {
+  } catch {
     return mockAuditEvents
   }
 }

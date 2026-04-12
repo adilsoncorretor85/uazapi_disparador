@@ -1,6 +1,6 @@
 ﻿import { createServerClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { env } from "@/lib/env"
-import { mockMessages } from "@/lib/mocks/messages"
 import type { CampaignMessageWithContact } from "@/types/entities"
 
 export interface MessageFilters {
@@ -21,10 +21,12 @@ export async function listCampaignMessages(
   filters: MessageFilters = {}
 ) {
   if (!env.NEXT_PUBLIC_SUPABASE_URL || !env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-    return { data: mockMessages, count: mockMessages.length }
+    return { data: [], count: 0 }
   }
 
-  const supabase = createServerClient()
+  const supabase = env.SUPABASE_SERVICE_ROLE_KEY
+    ? createAdminClient()
+    : createServerClient()
   const page = filters.page ?? 1
   const pageSize = filters.pageSize ?? 20
   const rangeFrom = (page - 1) * pageSize
@@ -43,7 +45,7 @@ export async function listCampaignMessages(
       .range(rangeFrom, rangeTo)
 
     if (filters.search) {
-      const base = `phone_e164.ilike.%${filters.search}%,phone_digits.ilike.%${filters.search}%,message_body.ilike.%${filters.search}%,contact_id.ilike.%${filters.search}%`
+      const base = `phone_e164.ilike.%${filters.search}%,phone_digits.ilike.%${filters.search}%,message_body.ilike.%${filters.search}%,contact_id.ilike.%${filters.search}%,provider_message_id.ilike.%${filters.search}%,provider_status.ilike.%${filters.search}%`
       const joined = `${base},contacts.full_name.ilike.%${filters.search}%,contacts.first_name.ilike.%${filters.search}%`
       query = query.or(withJoin ? joined : base)
     }
@@ -86,14 +88,17 @@ export async function listCampaignMessages(
       await buildQuery(false)
 
     if (fallbackError || !fallbackData) {
-      return { data: mockMessages, count: mockMessages.length }
+      return { data: [], count: 0 }
     }
 
     return {
-      data: fallbackData as CampaignMessageWithContact[],
+      data: fallbackData as unknown as CampaignMessageWithContact[],
       count: fallbackCount ?? fallbackData.length
     }
   }
 
-  return { data: data as CampaignMessageWithContact[], count: count ?? data.length }
+  return {
+    data: data as unknown as CampaignMessageWithContact[],
+    count: count ?? data.length
+  }
 }

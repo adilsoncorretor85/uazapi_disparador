@@ -12,6 +12,6 @@ export async function GET(request: Request) {
     instance_id: searchParams.get("instance_id") ?? undefined
   })
 
-  return NextResponse.json(data)
+  return NextResponse.json({ data })
 }
 

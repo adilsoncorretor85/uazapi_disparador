@@ -1,3 +1,5 @@
+﻿import type { ApiResponse } from "@/lib/services/http"
+
 export interface UploadResult {
   bucket: string
   path: string
@@ -21,5 +23,6 @@ export async function uploadMedia(file: File, folder?: string) {
     throw new Error(text || "Erro ao enviar mídia")
   }
 
-  return (await res.json()) as UploadResult
+  const payload = (await res.json()) as ApiResponse<UploadResult>
+  return payload.data
 }

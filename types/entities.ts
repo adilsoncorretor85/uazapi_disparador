@@ -1,5 +1,7 @@
 ﻿import type { CampaignStatus, MessageStatus } from "@/lib/constants/status"
 
+export type EntityId = string | number
+
 export interface WhatsAppInstance {
   id: string
   name: string
@@ -57,7 +59,7 @@ export interface Contact {
 }
 
 export interface Campaign {
-  id: string
+  id: EntityId
   instance_id: string
   title: string
   description?: string | null
@@ -100,7 +102,7 @@ export interface Campaign {
 
 export interface CampaignMessageVariant {
   id: string
-  campaign_id: string
+  campaign_id: EntityId
   sort_order: number
   message_body: string
   is_active: boolean
@@ -111,8 +113,8 @@ export interface CampaignMessageVariant {
 }
 
 export interface CampaignMessage {
-  id: string
-  campaign_id: string
+  id: EntityId
+  campaign_id: EntityId
   instance_id: string
   contact_id?: string | null
   selected_variant_id?: string | null
@@ -159,9 +161,10 @@ export interface CampaignMessageWithContact extends CampaignMessage {
 }
 
 export interface WebhookEvent {
-  id: string
-  campaign_id?: string | null
+  id: EntityId
+  campaign_id?: EntityId | null
   received_at: string
+  processed_at?: string | null
   event_type?: string | null
   provider_message_id?: string | null
   process_status?: string | null

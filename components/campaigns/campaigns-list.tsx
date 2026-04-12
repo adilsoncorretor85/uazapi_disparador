@@ -12,12 +12,21 @@ import {
   MoreHorizontal,
   Pencil,
   PlayCircle,
-  StopCircle
+  StopCircle,
+  Trash2
 } from "lucide-react"
 import { duplicateCampaign, fetchCampaigns, runCampaignAction } from "@/lib/services/campaigns"
 import { fetchInstances } from "@/lib/services/instances"
 import { formatDateTime, formatNumber } from "@/lib/format"
-import { CAMPAIGN_STATUS_LABELS } from "@/lib/constants/status"
+import {
+  CAMPAIGN_STATUS_LABELS,
+  getCampaignDisplayStatus,
+  canEditCampaign,
+  canDeleteCampaign,
+  canPauseCampaign,
+  canResumeCampaign,
+  canCancelCampaign
+} from "@/lib/constants/status"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import {
@@ -49,7 +58,7 @@ export default function CampaignsList() {
 
   const queryKey = useMemo(() => ["campaigns", search, status, from, to], [search, status, from, to])
 
-  const { data, isLoading } = useQuery({
+  const { data: campaignsResponse, isLoading } = useQuery({
     queryKey,
     queryFn: () =>
       fetchCampaigns({
@@ -60,7 +69,7 @@ export default function CampaignsList() {
       })
   })
 
-  const { data: instances } = useQuery({
+  const { data: instancesResponse } = useQuery({
     queryKey: ["instances"],
     queryFn: () => fetchInstances()
   })
@@ -75,13 +84,14 @@ export default function CampaignsList() {
     onSuccess: (result, variables) => {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] })
       if (variables.action === "duplicate") {
-        router.push(`/campaigns/${result.campaign.id}`)
+        router.push(`/campaigns/${result.data.id}`)
       }
     }
   })
 
-  const campaigns = data?.data ?? []
-  const summary = data?.summary
+  const campaigns = campaignsResponse?.data ?? []
+  const summary = campaignsResponse?.meta?.summary
+  const instances = instancesResponse?.data
   const instanceMap = useMemo(
     () =>
       new Map(
@@ -168,13 +178,12 @@ export default function CampaignsList() {
               </TableRow>
             ) : (
               campaigns.map((campaign) => {
-                const displayStatus = campaign.derived_status ?? campaign.status
-                const canEdit =
-                  displayStatus === "draft" ||
-                  displayStatus === "scheduled" ||
-                  displayStatus === "paused"
-                const canPause = displayStatus === "processing"
-                const canResume = displayStatus === "paused"
+                const displayStatus = getCampaignDisplayStatus(campaign)
+                const canEdit = canEditCampaign(displayStatus)
+                const canDelete = canDeleteCampaign(displayStatus)
+                const canPause = canPauseCampaign(displayStatus)
+                const canResume = canResumeCampaign(displayStatus)
+                const canCancel = canCancelCampaign(displayStatus)
                 return (
                 <TableRow key={campaign.id}>
                   <TableCell>
@@ -228,14 +237,14 @@ export default function CampaignsList() {
                           </DropdownMenuItem>
                         ) : null}
                         <DropdownMenuItem
-                          onClick={() => actionMutation.mutate({ id: campaign.id, action: "duplicate" })}
+                          onClick={() => actionMutation.mutate({ id: String(campaign.id), action: "duplicate" })}
                         >
                           <Copy className="mr-2 h-4 w-4" />
                           Duplicar
                         </DropdownMenuItem>
                         {canPause ? (
                           <DropdownMenuItem
-                            onClick={() => actionMutation.mutate({ id: campaign.id, action: "pause" })}
+                            onClick={() => actionMutation.mutate({ id: String(campaign.id), action: "pause" })}
                           >
                             <CirclePause className="mr-2 h-4 w-4" />
                             Pausar
@@ -243,19 +252,34 @@ export default function CampaignsList() {
                         ) : null}
                         {canResume ? (
                           <DropdownMenuItem
-                            onClick={() => actionMutation.mutate({ id: campaign.id, action: "resume" })}
+                            onClick={() => actionMutation.mutate({ id: String(campaign.id), action: "resume" })}
                           >
                             <PlayCircle className="mr-2 h-4 w-4" />
                             Continuar
                           </DropdownMenuItem>
                         ) : null}
-                        <DropdownMenuItem
-                          className="text-destructive"
-                          onClick={() => actionMutation.mutate({ id: campaign.id, action: "cancel" })}
-                        >
-                          <StopCircle className="mr-2 h-4 w-4" />
-                          Cancelar
-                        </DropdownMenuItem>
+                        {canCancel ? (
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={() => actionMutation.mutate({ id: String(campaign.id), action: "cancel" })}
+                          >
+                            <StopCircle className="mr-2 h-4 w-4" />
+                            Cancelar
+                          </DropdownMenuItem>
+                        ) : null}
+                        {canDelete ? (
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={() => {
+                              if (confirm("Excluir campanha? Isso remove envios, variantes e público desta campanha.")) {
+                                actionMutation.mutate({ id: String(campaign.id), action: "delete" })
+                              }
+                            }}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Excluir
+                          </DropdownMenuItem>
+                        ) : null}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>
@@ -269,3 +293,7 @@ export default function CampaignsList() {
     </div>
   )
 }
+
+
+
+

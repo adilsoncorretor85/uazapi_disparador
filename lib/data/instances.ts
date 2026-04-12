@@ -9,18 +9,14 @@ export async function listInstances() {
     return mockInstances
   }
 
-  try {
-    const supabase = createAdminClient()
-    const { data, error } = await supabase.rpc("list_whatsapp_instances")
+  const supabase = createAdminClient()
+  const { data, error } = await supabase.rpc("list_whatsapp_instances")
 
-    if (error || !data) {
-      return mockInstances
-    }
-
-    return (data as WhatsAppInstance[]).map((row) => ({ ...row, token: null }))
-  } catch (error) {
-    return mockInstances
+  if (error || !data) {
+    throw error ?? new Error("Nao foi possivel carregar as instancias.")
   }
+
+  return (data as WhatsAppInstance[]).map((row) => ({ ...row, token: null }))
 }
 
 export async function createInstance(values: InstanceFormValues) {

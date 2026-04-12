@@ -56,3 +56,49 @@
 
   return fallback
 }
+
+export type InstanceConnectionStatus = "Conectado" | "Conectando" | "Desconectado"
+
+export function normalizeConnectionStatus(
+  value?: string | null,
+  fallback: InstanceConnectionStatus = "Desconectado"
+): InstanceConnectionStatus {
+  if (!value) return fallback
+  const normalized = value.toLowerCase().trim()
+
+  if (
+    normalized === "conectado" ||
+    normalized === "connected" ||
+    normalized === "online" ||
+    normalized === "open"
+  ) {
+    return "Conectado"
+  }
+  if (
+    normalized === "conectando" ||
+    normalized.includes("connecting") ||
+    normalized.includes("pair") ||
+    normalized.includes("qr")
+  ) {
+    return "Conectando"
+  }
+  if (
+    normalized === "desconectado" ||
+    normalized.includes("disconnected") ||
+    normalized.includes("offline") ||
+    normalized.includes("closed") ||
+    normalized.includes("error")
+  ) {
+    return "Desconectado"
+  }
+
+  if (normalized.includes("conect")) {
+    return normalized.includes("desconect") ? "Desconectado" : "Conectado"
+  }
+
+  return fallback
+}
+
+export function isInstanceConnected(value?: string | null) {
+  return normalizeConnectionStatus(value) === "Conectado"
+}
